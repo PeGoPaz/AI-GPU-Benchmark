@@ -1,101 +1,124 @@
 import time
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
+from peft import LoraConfig, get_peft_model
+from datasets import load_dataset
 
-class HeavySyntheticModel(nn.Module):
-    """A heavy neural network layer stack designed to stress GPU compute and VRAM."""
-    def __init__(self, size=4096):
-        super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(size, size),
-            nn.ReLU(),
-            nn.Linear(size, size),
-            nn.ReLU(),
-            nn.Linear(size, size),
-            nn.ReLU(),
-            nn.Linear(size, 10)
-        )
 
-    def forward(self, x):
-        return self.layers(x)
+class PyQtProgressCallback(TrainerCallback):
+    """Custom Hugging Face callback to send progress back to the PyQt UI."""
+    def __init__(self, worker):
+        self.worker = worker
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # Abort training if the user closed the window
+        if not self.worker._is_running:
+            control.should_training_stop = True
+            
+        # Emit the current step and the latest loss value
+        loss = state.log_history[-1].get("loss", 0.0) if state.log_history else 0.0
+        self.worker.progress_updated.emit(state.global_step, loss)
 
 
 class TrainerWorker(QThread):
-    # Signals to communicate training progress back to the UI
     status_updated = pyqtSignal(str)
-    progress_updated = pyqtSignal(int, float)  # (current_step, loss)
-    training_finished = pyqtSignal(dict)       # Summary metrics
+    progress_updated = pyqtSignal(int, float)
+    training_finished = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, steps: int = 1000, batch_size: int = 256, parent=None):
+    def __init__(self, steps: int = 200, batch_size: int = 4, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
         self._is_running = True
 
     def run(self):
-        """Executes the GPU training workload in a separate thread."""
-        if not torch.cuda.is_available():
-            self.error_occurred.emit("PyTorch cannot detect CUDA/GPU!")
-            return
-
         try:
-            device = torch.device("cuda:0")
-            self.status_updated.emit(f"Allocating model & tensors on {torch.cuda.get_device_name(0)}...")
+            self.status_updated.emit("Loading Tokenizer & Dataset (may take a moment on first run)...")
+            
+            model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            
+            # 1. Load Dataset (A small dataset of English quotes)
+            data = load_dataset("Abirate/english_quotes")
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            tokenizer.pad_token = tokenizer.eos_token
+            
+            def tokenize(batch):
+                return tokenizer(batch["quote"], padding="max_length", truncation=True, max_length=128)
+            
+            tokenized_data = data["train"].map(tokenize, batched=True)
 
-            # 1. Initialize heavy synthetic benchmark model & optimizer
-            model = HeavySyntheticModel(size=8192).to(device)
-            optimizer = optim.AdamW(model.parameters(), lr=1e-3)
-            criterion = nn.MSELoss()
+            self.status_updated.emit("Loading Base Model into VRAM...")
+            
+            # 2. Load Model 
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id, 
+                device_map="cuda:0", 
+                torch_dtype=torch.bfloat16 # Uses 16-bit precision for modern RTX cards
+            )
+            
+            self.status_updated.emit("Applying LoRA Adapters...")
+            
+            # 3. Apply LoRA (Low-Rank Adaptation)
+            config = LoraConfig(
+                r=8, 
+                lora_alpha=16, 
+                target_modules=["q_proj", "v_proj"], 
+                lora_dropout=0.05,
+                bias="none", 
+                task_type="CAUSAL_LM"
+            )
+            model = get_peft_model(model, config)
 
+            # 4. Set up Hugging Face Trainer
+            training_args = TrainingArguments(
+                output_dir="./results",
+                per_device_train_batch_size=self.batch_size,
+                gradient_accumulation_steps=4, # Simulates a batch size of 16 (4x4)
+                max_steps=self.steps,
+                logging_steps=1,
+                learning_rate=2e-4,
+                fp16=False,
+                bf16=True, # RTX 40-series optimizes bfloat16 incredibly well
+                report_to="none" # Disables wandb/tensorboard logging
+            )
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=tokenized_data,
+                args=training_args,
+                data_collator=lambda data: {'input_ids': torch.stack([torch.tensor(d['input_ids']) for d in data]), 
+                                            'attention_mask': torch.stack([torch.tensor(d['attention_mask']) for d in data]), 
+                                            'labels': torch.stack([torch.tensor(d['input_ids']) for d in data])},
+                callbacks=[PyQtProgressCallback(self)]
+            )
+
+            self.status_updated.emit(f"Starting LoRA Fine-Tuning for {self.steps} steps...")
+            
             start_time = time.time()
-            total_loss = 0.0
-
-            self.status_updated.emit("Benchmark training started — stress testing GPU...")
-
-            # 2. Main Training Loop
-            for step in range(1, self.steps + 1):
-                if not self._is_running:
-                    self.status_updated.emit("Training aborted by user.")
-                    return
-
-                # Generate dummy high-dimensional batch on CUDA
-                inputs = torch.randn(self.batch_size, 8192, device=device)
-                targets = torch.randn(self.batch_size, 10, device=device)
-
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
-
-                loss_val = loss.item()
-                total_loss += loss_val
-
-                # Emit step progress
-                if step % 10 == 0 or step == self.steps:
-                    self.progress_updated.emit(step, loss_val)
+            
+            # 5. Execute Training!
+            trainer.train()
 
             elapsed_time = time.time() - start_time
-            avg_loss = total_loss / self.steps
 
             summary = {
                 "total_steps": self.steps,
                 "elapsed_time_sec": round(elapsed_time, 2),
-                "avg_loss": round(avg_loss, 4),
                 "steps_per_sec": round(self.steps / elapsed_time, 2),
             }
 
-            self.status_updated.emit("Benchmark run complete!")
+            self.status_updated.emit("LoRA Fine-Tuning Complete!")
             self.training_finished.emit(summary)
 
+            # Optional: Save the adapter weights
+            # model.save_pretrained("./lora_adapter")
+
         except Exception as e:
-            self.error_occurred.emit(f"Training Error: {str(e)}")
+            self.error_occurred.emit(f"HF Training Error: {str(e)}")
 
     def stop(self):
-        """Safely interrupts the training loop."""
         self._is_running = False
         self.wait()

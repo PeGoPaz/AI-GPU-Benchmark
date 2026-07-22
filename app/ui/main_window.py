@@ -1,3 +1,4 @@
+from app.utils.logger import BenchmarkLogger
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(right_panel, 2)
 
         # --- INITIALIZE THREADS ---
+        self.logger = BenchmarkLogger()
         self.telemetry = TelemetryWorker(interval_ms=250)
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.start()
@@ -84,6 +86,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def update_telemetry_ui(self, data: dict):
         """Updates the dashboard with live PyNVML data."""
+        self.logger.log(data)
         self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
         self.lbl_power.setText(f"Power: {data['power_w']} W")
         self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
@@ -95,8 +98,9 @@ class MainWindow(QMainWindow):
         self.btn_start.setStyleSheet("background-color: #555555; color: white;")
         self.progress_bar.setValue(0)
         self.log_to_console("\n--- Starting Synthetic Workload ---")
+        self.logger.start()
 
-        self.trainer = TrainerWorker(steps=1000, batch_size=256)
+        self.trainer = TrainerWorker(steps=150, batch_size=4)
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
         self.trainer.training_finished.connect(self.on_benchmark_finished)
@@ -105,6 +109,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
+        plot_file = self.logger.stop_and_save()
+        if plot_file:
+            self.log_to_console(f"Data saved! Graph generated at: {plot_file}")
         self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
         self.btn_start.setEnabled(True)
