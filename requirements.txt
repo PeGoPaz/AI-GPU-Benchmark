@@ -1,0 +1,16 @@
+# UI Framework
+PyQt6>=6.6.0
+
+# Telemetry & Hardware Monitoring
+nvidia-ml-py>=12.0.0
+
+# ML & Fine-Tuning Stack
+torch>=2.2.0
+transformers>=4.40.0
+peft>=0.10.0
+datasets>=2.18.0
+trl>=0.8.0
+
+# Visualization & Data
+matplotlib>=3.8.0
+pandas>=2.2.0
