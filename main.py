@@ -4,10 +4,8 @@ from app.ui.main_window import MainWindow
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
-    # Optional: Set a dark theme globally
-    app.setStyle("Fusion")
-    
+
+    app.setStyle("Fusion")    
     window = MainWindow()
     window.show()
     
