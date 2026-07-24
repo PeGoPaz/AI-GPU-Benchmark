@@ -28,6 +28,7 @@ def _read_hotspot_temperature(handle):
 class TelemetryWorker(QThread):
     # Signals to pass hardware telemetry data back to the UI thread
     data_updated = pyqtSignal(dict)
+    gpu_name_ready = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, interval_ms: int = 250, parent=None):
@@ -40,6 +41,13 @@ class TelemetryWorker(QThread):
         try:
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+            # Emit GPU name once at startup
+            gpu_name = pynvml.nvmlDeviceGetName(handle)
+            if isinstance(gpu_name, bytes):
+                gpu_name = gpu_name.decode("utf-8", errors="replace")
+            # Some nvidia-ml-py versions return str already
+            self.gpu_name_ready.emit(gpu_name)
         except Exception as e:
             self.error_occurred.emit(f"NVML Initialization Failed: {str(e)}")
             return

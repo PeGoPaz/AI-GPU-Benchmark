@@ -14,8 +14,8 @@ from app.utils.logger import BenchmarkLogger
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI GPU Benchmark - RTX 4070 Ti Super")
-        self.resize(800, 500)
+        self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
+        self.resize(800, 600)
 
         # Main Layout
         central_widget = QWidget()
@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self.logger = BenchmarkLogger()
         self.telemetry = TelemetryWorker(interval_ms=250)
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
+        self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
         self.telemetry.start()
         
         self.trainer = None
@@ -98,6 +99,12 @@ class MainWindow(QMainWindow):
     def log_to_console(self, text: str):
         """Appends text to the mock terminal window."""
         self.console.append(text)
+
+    @pyqtSlot(str)
+    def _on_gpu_name_ready(self, gpu_name: str):
+        """Updates the window title once the GPU name is detected."""
+        self.setWindowTitle(f"AI GPU Benchmark — {gpu_name}")
+        self.log_to_console(f"Detected GPU: {gpu_name}")
 
     @pyqtSlot(dict)
     def update_telemetry_ui(self, data: dict):
