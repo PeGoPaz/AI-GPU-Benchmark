@@ -1,7 +1,8 @@
 from PyQt6.QtCore import pyqtSlot, Qt
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGroupBox, QLabel, QPushButton, QProgressBar, QTextEdit
+    QGroupBox, QLabel, QPushButton, QProgressBar, QTextEdit,
+    QTableWidget, QTableWidgetItem, QTabWidget, QHeaderView
 )
 
 from matplotlib.figure import Figure
@@ -11,11 +12,12 @@ from app.core.telemetry import TelemetryWorker
 from app.core.trainer import TrainerWorker
 from app.utils.logger import BenchmarkLogger
 
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
-        self.resize(800, 600)
+        self.resize(800, 650)
 
         # Main Layout
         central_widget = QWidget()
@@ -34,7 +36,6 @@ class MainWindow(QMainWindow):
         self.lbl_clock = QLabel("Clock: -- MHz")
         self.lbl_vram = QLabel("VRAM: -- / -- MiB")
         
-        # Make the fonts slightly larger for the dashboard
         for lbl in [self.lbl_temp, self.lbl_hotspot, self.lbl_power, self.lbl_clock, self.lbl_vram]:
             lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
             hw_layout.addWidget(lbl)
@@ -45,45 +46,78 @@ class MainWindow(QMainWindow):
         # 2. Controls
         ctrl_group = QGroupBox("Benchmark Controls")
         ctrl_layout = QVBoxLayout()
+        
         self.btn_start = QPushButton("Start Stress Test")
         self.btn_start.setMinimumHeight(40)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
         self.btn_start.clicked.connect(self.start_benchmark)
         
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setMinimumHeight(35)
+        self.btn_stop.setStyleSheet("background-color: #8B0000; color: white; font-weight: bold;")
+        self.btn_stop.clicked.connect(self.stop_benchmark)
+        self.btn_stop.setEnabled(False)
+        
+        self.btn_export = QPushButton("Export Results")
+        self.btn_export.setMinimumHeight(35)
+        self.btn_export.setStyleSheet("background-color: #4682B4; color: white;")
+        self.btn_export.clicked.connect(self.export_results)
+        self.btn_export.setEnabled(False)
+        
         ctrl_layout.addWidget(self.btn_start)
+        ctrl_layout.addWidget(self.btn_stop)
+        ctrl_layout.addWidget(self.btn_export)
         ctrl_group.setLayout(ctrl_layout)
         left_panel.addWidget(ctrl_group)
-        left_panel.addStretch() # Pushes everything up
+        left_panel.addStretch()
 
-        # --- RIGHT PANEL: Console & Progress ---
+        # --- RIGHT PANEL: Console, Progress, Plots, Summary ---
         right_panel = QVBoxLayout()
         
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setMaximumHeight(220)
+        self.console.setMaximumHeight(180)
         self.console.setStyleSheet("background-color: #1E1E1E; color: #00FF00; font-family: monospace;")
         self.log_to_console("System initialized. Ready for benchmark.")
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
 
-        # Plot area (hidden until a benchmark finishes)
-        self.plot_figure = Figure(figsize=(8, 3))
-        self.plot_canvas = FigureCanvas(self.plot_figure)
-        self.plot_canvas.setMinimumHeight(260)
-        self.plot_container = QWidget()
-        plot_layout = QVBoxLayout(self.plot_container)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
-        plot_layout.addWidget(QLabel("Thermal & Power Curve"))
-        plot_layout.addWidget(self.plot_canvas)
-        self.plot_container.setVisible(False)
+        # Tab widget for multiple plots
+        self.plot_tabs = QTabWidget()
+        self.plot_tabs.setMinimumHeight(280)
+        self.plot_tabs.setVisible(False)
+        
+        # Tab 1: Thermal & Power
+        thermal_figure = Figure(figsize=(8, 3))
+        self.thermal_canvas = FigureCanvas(thermal_figure)
+        self.plot_tabs.addTab(self.thermal_canvas, "Thermal & Power")
+        
+        # Tab 2: Utilization & Clock
+        util_figure = Figure(figsize=(8, 3))
+        self.util_canvas = FigureCanvas(util_figure)
+        self.plot_tabs.addTab(self.util_canvas, "Utilization & Clock")
+        
+        # Summary stats table
+        self.summary_group = QGroupBox("Benchmark Summary")
+        summary_layout = QVBoxLayout()
+        self.summary_table = QTableWidget()
+        self.summary_table.setColumnCount(2)
+        self.summary_table.setHorizontalHeaderLabels(["Metric", "Value"])
+        self.summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.summary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.summary_table.setMaximumHeight(200)
+        summary_layout.addWidget(self.summary_table)
+        self.summary_group.setLayout(summary_layout)
+        self.summary_group.setVisible(False)
 
         right_panel.addWidget(QLabel("Execution Log:"))
         right_panel.addWidget(self.console)
         right_panel.addWidget(self.progress_bar)
-        right_panel.addWidget(self.plot_container, 1)
+        right_panel.addWidget(self.plot_tabs, 2)
+        right_panel.addWidget(self.summary_group)
 
-        # Add panels to main layout (Left takes 1 part, Right takes 2 parts of width)
         main_layout.addLayout(left_panel, 1)
         main_layout.addLayout(right_panel, 2)
 
@@ -97,7 +131,7 @@ class MainWindow(QMainWindow):
         self.trainer = None
 
     def log_to_console(self, text: str):
-        """Appends text to the mock terminal window."""
+        """Appends text to the console window."""
         self.console.append(text)
 
     @pyqtSlot(str)
@@ -112,7 +146,6 @@ class MainWindow(QMainWindow):
         self.logger.log(data)
         self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
         
-        # Hotspot may be None if GPU doesn't expose it
         if data.get('temp_hotspot') is not None:
             self.lbl_hotspot.setText(f"Hotspot: {data['temp_hotspot']} °C")
         else:
@@ -126,8 +159,11 @@ class MainWindow(QMainWindow):
         """Disables UI and fires up the PyTorch training thread."""
         self.btn_start.setEnabled(False)
         self.btn_start.setStyleSheet("background-color: #555555; color: white;")
+        self.btn_stop.setEnabled(True)
+        self.btn_export.setEnabled(False)
         self.progress_bar.setValue(0)
-        self.plot_container.setVisible(False)
+        self.plot_tabs.setVisible(False)
+        self.summary_group.setVisible(False)
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         self.logger.start()
 
@@ -139,26 +175,37 @@ class MainWindow(QMainWindow):
         self.trainer.error_occurred.connect(lambda err: self.log_to_console(f"ERROR: {err}"))
         self.trainer.start()
 
+    def stop_benchmark(self):
+        """Stops the benchmark if running."""
+        if self.trainer and self.trainer.isRunning():
+            self.log_to_console("\nStopping benchmark...")
+            self.trainer.stop()
+        self.btn_stop.setEnabled(False)
+
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
+        self.btn_stop.setEnabled(False)
         df = self.logger.stop()
         if df is not None:
-            self._render_plot(df)
+            self._render_plots(df, summary)
         self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
         self.btn_start.setEnabled(True)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
+        self.btn_export.setEnabled(True)
 
-    def _render_plot(self, df):
-        """Draws the thermal & power curves onto the embedded matplotlib canvas."""
-        self.plot_figure.clear()
-
-        ax1 = self.plot_figure.add_subplot(111)
+    def _render_plots(self, df, summary: dict):
+        """Draws thermal/power and utilization/clock plots into tabs."""
+        # --- Tab 1: Thermal & Power ---
+        tf = self.thermal_canvas.figure
+        tf.clear()
+        ax1 = tf.add_subplot(111)
         ax1.plot(df['time_sec'], df['temp_gpu'], color='#ff4c4c',
                  label='GPU Temp (°C)', linewidth=2)
         ax1.set_xlabel('Time (seconds)')
         ax1.set_ylabel('Temperature (°C)', color='#ff4c4c')
         ax1.tick_params(axis='y', labelcolor='#ff4c4c')
+        ax1.set_title('Thermal & Power Curve')
 
         ax2 = ax1.twinx()
         ax2.plot(df['time_sec'], df['power_w'], color='#4c72ff',
@@ -166,17 +213,80 @@ class MainWindow(QMainWindow):
         ax2.set_ylabel('Power (W)', color='#4c72ff')
         ax2.tick_params(axis='y', labelcolor='#4c72ff')
 
-        ax1.set_title('GPU Thermal & Power Curve During Stress Test')
         ax1.grid(True, alpha=0.2)
-
         lines_1, labels_1 = ax1.get_legend_handles_labels()
         lines_2, labels_2 = ax2.get_legend_handles_labels()
         ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
+        tf.tight_layout()
+        self.thermal_canvas.draw()
 
-        self.plot_figure.tight_layout()
-        self.plot_canvas.draw()
-        self.plot_container.setVisible(True)
-        self.log_to_console("Plot rendered.")
+        # --- Tab 2: Utilization & Clock ---
+        uf = self.util_canvas.figure
+        uf.clear()
+        ax3 = uf.add_subplot(111)
+        ax3.plot(df['time_sec'], df['gpu_util_pct'], color='#ffa500',
+                 label='GPU Utilization (%)', linewidth=2)
+        ax3.plot(df['time_sec'], df['sm_clock_mhz'], color='#00bfff',
+                 label='SM Clock (MHz)', linewidth=2, linestyle='--')
+        ax3.set_xlabel('Time (seconds)')
+        ax3.set_ylabel('Utilization (%)')
+        ax3.set_title('Utilization & Clock Speed')
+        ax3.legend(loc='upper left')
+        ax3.grid(True, alpha=0.2)
+        uf.tight_layout()
+        self.util_canvas.draw()
+
+        self.plot_tabs.setVisible(True)
+        self.plot_tabs.setCurrentIndex(0)
+        
+        # --- Summary Stats Table ---
+        self._render_summary(df, summary)
+        self.log_to_console("Summary and plots rendered.")
+
+    def _render_summary(self, df, summary: dict):
+        """Populates the summary table with computed benchmark metrics."""
+        avg_temp = df['temp_gpu'].mean()
+        max_temp = df['temp_gpu'].max()
+        avg_power = df['power_w'].mean()
+        peak_power = df['power_w'].max()
+        avg_vram = df['vram_used_mb'].mean()
+        peak_vram = df['vram_used_mb'].max()
+        
+        steps_per_sec = summary['steps_per_sec']
+        efficiency = steps_per_sec / avg_power if avg_power > 0 else 0
+        
+        metrics = [
+            ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
+            ("Steps/sec", f"{steps_per_sec:.2f}"),
+            ("Efficiency (steps/sec/W)", f"{efficiency:.4f}"),
+            ("Avg Temp (°C)", f"{avg_temp:.1f}"),
+            ("Max Temp (°C)", f"{max_temp}"),
+            ("Avg Power (W)", f"{avg_power:.1f}"),
+            ("Peak Power (W)", f"{peak_power:.1f}"),
+            ("Avg VRAM (MiB)", f"{avg_vram:.1f}"),
+            ("Peak VRAM (MiB)", f"{peak_vram:.1f}"),
+        ]
+        
+        self.summary_table.setRowCount(len(metrics))
+        for row, (metric, value) in enumerate(metrics):
+            item_m = QTableWidgetItem(metric)
+            item_m.setFlags(item_m.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item_v = QTableWidgetItem(value)
+            item_v.setFlags(item_v.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.summary_table.setItem(row, 0, item_m)
+            self.summary_table.setItem(row, 1, item_v)
+        
+        self.summary_group.setVisible(True)
+
+    def export_results(self):
+        """Exports the last benchmark's telemetry to CSV and renders plot PNG."""
+        df = self.logger.stop()
+        if df is None:
+            self.log_to_console("No data to export.")
+            return
+        csv_path, plot_path = BenchmarkLogger.export(df)
+        self.log_to_console(f"Exported: {csv_path}")
+        self.log_to_console(f"Exported: {plot_path}")
 
     def closeEvent(self, event):
         """Clean up threads on exit."""
