@@ -1,12 +1,15 @@
-from app.utils.logger import BenchmarkLogger
-from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtCore import pyqtSlot, Qt
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QLabel, QPushButton, QProgressBar, QTextEdit
 )
 
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
 from app.core.telemetry import TelemetryWorker
 from app.core.trainer import TrainerWorker
+from app.utils.logger import BenchmarkLogger
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -56,16 +59,28 @@ class MainWindow(QMainWindow):
         
         self.console = QTextEdit()
         self.console.setReadOnly(True)
+        self.console.setMaximumHeight(220)
         self.console.setStyleSheet("background-color: #1E1E1E; color: #00FF00; font-family: monospace;")
         self.log_to_console("System initialized. Ready for benchmark.")
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
+
+        # Plot area (hidden until a benchmark finishes)
+        self.plot_figure = Figure(figsize=(8, 3))
+        self.plot_canvas = FigureCanvas(self.plot_figure)
+        self.plot_canvas.setMinimumHeight(260)
+        self.plot_container = QWidget()
+        plot_layout = QVBoxLayout(self.plot_container)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addWidget(QLabel("Thermal & Power Curve"))
+        plot_layout.addWidget(self.plot_canvas)
+        self.plot_container.setVisible(False)
 
         right_panel.addWidget(QLabel("Execution Log:"))
         right_panel.addWidget(self.console)
         right_panel.addWidget(self.progress_bar)
+        right_panel.addWidget(self.plot_container, 1)
 
         # Add panels to main layout (Left takes 1 part, Right takes 2 parts of width)
         main_layout.addLayout(left_panel, 1)
@@ -97,25 +112,56 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_start.setStyleSheet("background-color: #555555; color: white;")
         self.progress_bar.setValue(0)
+        self.plot_container.setVisible(False)
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         self.logger.start()
 
         self.trainer = TrainerWorker(steps=150, batch_size=4)
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
+        self.trainer.max_steps_ready.connect(lambda steps: self.progress_bar.setRange(0, steps))
         self.trainer.training_finished.connect(self.on_benchmark_finished)
         self.trainer.error_occurred.connect(lambda err: self.log_to_console(f"ERROR: {err}"))
         self.trainer.start()
 
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
-        plot_file = self.logger.stop_and_save()
-        if plot_file:
-            self.log_to_console(f"Data saved! Graph generated at: {plot_file}")
+        df = self.logger.stop()
+        if df is not None:
+            self._render_plot(df)
         self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
         self.btn_start.setEnabled(True)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
+
+    def _render_plot(self, df):
+        """Draws the thermal & power curves onto the embedded matplotlib canvas."""
+        self.plot_figure.clear()
+
+        ax1 = self.plot_figure.add_subplot(111)
+        ax1.plot(df['time_sec'], df['temp_gpu'], color='#ff4c4c',
+                 label='GPU Temp (°C)', linewidth=2)
+        ax1.set_xlabel('Time (seconds)')
+        ax1.set_ylabel('Temperature (°C)', color='#ff4c4c')
+        ax1.tick_params(axis='y', labelcolor='#ff4c4c')
+
+        ax2 = ax1.twinx()
+        ax2.plot(df['time_sec'], df['power_w'], color='#4c72ff',
+                 label='Power Draw (W)', linewidth=2, linestyle='--')
+        ax2.set_ylabel('Power (W)', color='#4c72ff')
+        ax2.tick_params(axis='y', labelcolor='#4c72ff')
+
+        ax1.set_title('GPU Thermal & Power Curve During Stress Test')
+        ax1.grid(True, alpha=0.2)
+
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
+
+        self.plot_figure.tight_layout()
+        self.plot_canvas.draw()
+        self.plot_container.setVisible(True)
+        self.log_to_console("Plot rendered.")
 
     def closeEvent(self, event):
         """Clean up threads on exit."""

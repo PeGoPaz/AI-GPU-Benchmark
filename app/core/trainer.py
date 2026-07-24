@@ -27,6 +27,7 @@ class TrainerWorker(QThread):
     progress_updated = pyqtSignal(int, float)
     training_finished = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
+    max_steps_ready = pyqtSignal(int)
 
     def __init__(self, steps: int = 200, batch_size: int = 4, parent=None):
         super().__init__(parent)
@@ -36,6 +37,7 @@ class TrainerWorker(QThread):
 
     def run(self):
         try:
+            self.max_steps_ready.emit(self.steps)
             self.status_updated.emit("Loading Tokenizer & Dataset (may take a moment on first run)...")
             
             model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
