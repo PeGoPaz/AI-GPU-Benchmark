@@ -1,5 +1,8 @@
+import gc
+import subprocess
 import time
 import torch
+import pynvml
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
@@ -20,6 +23,43 @@ class PyQtProgressCallback(TrainerCallback):
         # Emit the current step and the latest loss value
         loss = state.log_history[-1].get("loss", 0.0) if state.log_history else 0.0
         self.worker.progress_updated.emit(state.global_step, loss)
+
+
+def _read_hotspot_temperature():
+    """Attempt to read GPU hotspot (junction) temperature.
+    Returns float or None if unavailable on this GPU/driver combo.
+    """
+    # Method 1: Try NVML extended temperature sensor (some nvidia-ml-py versions)
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        # Sensor type 1 is often hotspot/junction on newer GPUs
+        return pynvml.nvmlDeviceGetTemperature(handle, 1)
+    except Exception:
+        pass
+
+    # Method 2: Parse nvidia-smi XML output for hotspot temp
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3
+        )
+        # nvidia-smi doesn't always expose hotspot separately,
+        # but some drivers show it via nvidia-smi -q XML parsing
+        result2 = subprocess.run(
+            ["nvidia-smi", "-q", "-d", "TEMPERATURE"],
+            capture_output=True, text=True, timeout=3
+        )
+        for line in result2.stdout.splitlines():
+            if "hotspot" in line.lower() or "junction" in line.lower():
+                # Extract number from line like "GPU Hot Spot Temp" : "42 C"
+                parts = line.split(":")
+                if len(parts) == 2:
+                    val_str = parts[1].strip().replace('"', '').replace('C', '').strip()
+                    return float(val_str)
+    except Exception:
+        pass
+
+    return None
 
 
 class TrainerWorker(QThread):
@@ -115,8 +155,12 @@ class TrainerWorker(QThread):
             self.status_updated.emit("LoRA Fine-Tuning Complete!")
             self.training_finished.emit(summary)
 
-            # Optional: Save the adapter weights
-            # model.save_pretrained("./lora_adapter")
+            # --- Instant VRAM Offload ---
+            self.status_updated.emit("Offloading model from VRAM...")
+            del trainer, model, tokenizer, tokenized_data, data, config, training_args
+            gc.collect()
+            torch.cuda.empty_cache()
+            self.status_updated.emit("VRAM freed.")
 
         except Exception as e:
             self.error_occurred.emit(f"HF Training Error: {str(e)}")

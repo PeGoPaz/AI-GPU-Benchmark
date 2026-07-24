@@ -29,12 +29,13 @@ class MainWindow(QMainWindow):
         hw_group = QGroupBox("Live Hardware Telemetry")
         hw_layout = QVBoxLayout()
         self.lbl_temp = QLabel("Temp: -- °C")
+        self.lbl_hotspot = QLabel("Hotspot: -- °C")
         self.lbl_power = QLabel("Power: -- W")
         self.lbl_clock = QLabel("Clock: -- MHz")
         self.lbl_vram = QLabel("VRAM: -- / -- MiB")
         
         # Make the fonts slightly larger for the dashboard
-        for lbl in [self.lbl_temp, self.lbl_power, self.lbl_clock, self.lbl_vram]:
+        for lbl in [self.lbl_temp, self.lbl_hotspot, self.lbl_power, self.lbl_clock, self.lbl_vram]:
             lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
             hw_layout.addWidget(lbl)
             
@@ -103,6 +104,13 @@ class MainWindow(QMainWindow):
         """Updates the dashboard with live PyNVML data."""
         self.logger.log(data)
         self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
+        
+        # Hotspot may be None if GPU doesn't expose it
+        if data.get('temp_hotspot') is not None:
+            self.lbl_hotspot.setText(f"Hotspot: {data['temp_hotspot']} °C")
+        else:
+            self.lbl_hotspot.setText("Hotspot: N/A")
+        
         self.lbl_power.setText(f"Power: {data['power_w']} W")
         self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
         self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
