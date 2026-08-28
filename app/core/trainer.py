@@ -14,10 +14,14 @@ class PyQtProgressCallback(TrainerCallback):
         self.worker = worker
 
     def on_step_end(self, args, state, control, **kwargs):
-        # Abort training if the user closed the window
+        # Abort training if the user pressed Stop or closed the window
         if not self.worker._is_running:
             control.should_training_stop = True
-            
+
+        # Record how far we actually got, so the summary reflects reality
+        # rather than the requested step count after an early stop.
+        self.worker.completed_steps = state.global_step
+
         # Emit the current step and the latest loss value
         loss = state.log_history[-1].get("loss", 0.0) if state.log_history else 0.0
         self.worker.progress_updated.emit(state.global_step, loss)
@@ -34,6 +38,7 @@ class TrainerWorker(QThread):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
+        self.completed_steps = 0
         self._is_running = True
 
     def run(self):
@@ -107,13 +112,26 @@ class TrainerWorker(QThread):
 
             elapsed_time = time.time() - start_time
 
+            # Use the steps we actually completed. After a Stop the loop exits
+            # early, so dividing self.steps by the (short) elapsed time would
+            # massively overstate throughput.
+            steps_done = self.completed_steps or self.steps
+            was_aborted = steps_done < self.steps
+
             summary = {
-                "total_steps": self.steps,
+                "total_steps": steps_done,
+                "requested_steps": self.steps,
+                "aborted": was_aborted,
                 "elapsed_time_sec": round(elapsed_time, 2),
-                "steps_per_sec": round(self.steps / elapsed_time, 2),
+                "steps_per_sec": round(steps_done / elapsed_time, 2) if elapsed_time > 0 else 0.0,
             }
 
-            self.status_updated.emit("LoRA Fine-Tuning Complete!")
+            if was_aborted:
+                self.status_updated.emit(
+                    f"Training stopped early at {steps_done}/{self.steps} steps."
+                )
+            else:
+                self.status_updated.emit("LoRA Fine-Tuning Complete!")
             self.training_finished.emit(summary)
 
             # --- Instant VRAM Offload ---
@@ -127,5 +145,16 @@ class TrainerWorker(QThread):
             self.error_occurred.emit(f"HF Training Error: {str(e)}")
 
     def stop(self):
+        """Requests an early stop without blocking the caller.
+
+        This is called from the UI thread, so it must NOT wait() — the current
+        training step can take seconds and would freeze the window. The
+        callback picks up the flag at the next step boundary; use
+        wait_for_exit() when you genuinely need to block (e.g. on app close).
+        """
         self._is_running = False
-        self.wait()
+
+    def wait_for_exit(self, timeout_ms: int = 30000) -> bool:
+        """Blocks until the worker thread finishes. Only for shutdown paths."""
+        self._is_running = False
+        return self.wait(timeout_ms)

@@ -20,9 +20,16 @@ class BenchmarkLogger:
             self.data.append(telemetry_data)
 
     def stop(self) -> pd.DataFrame | None:
-        """Stops logging and returns the collected data as a DataFrame."""
+        """Stops logging and returns the collected run as a DataFrame."""
         self.is_logging = False
+        return self.to_dataframe()
 
+    def to_dataframe(self) -> pd.DataFrame | None:
+        """Returns the collected telemetry without changing logging state.
+
+        Safe to call repeatedly — exporting must not depend on whether stop()
+        happened to be called first, nor mutate the run being inspected.
+        """
         if not self.data:
             return None
 

@@ -31,12 +31,14 @@ class MainWindow(QMainWindow):
         hw_group = QGroupBox("Live Hardware Telemetry")
         hw_layout = QVBoxLayout()
         self.lbl_temp = QLabel("Temp: -- °C")
-        self.lbl_hotspot = QLabel("Hotspot: -- °C")
+        self.lbl_mem_temp = QLabel("Mem Temp: -- °C")
+        self.lbl_headroom = QLabel("Thermal Headroom: -- °C")
         self.lbl_power = QLabel("Power: -- W")
         self.lbl_clock = QLabel("Clock: -- MHz")
         self.lbl_vram = QLabel("VRAM: -- / -- MiB")
-        
-        for lbl in [self.lbl_temp, self.lbl_hotspot, self.lbl_power, self.lbl_clock, self.lbl_vram]:
+
+        for lbl in [self.lbl_temp, self.lbl_mem_temp, self.lbl_headroom,
+                    self.lbl_power, self.lbl_clock, self.lbl_vram]:
             lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
             hw_layout.addWidget(lbl)
             
@@ -145,12 +147,19 @@ class MainWindow(QMainWindow):
         """Updates the dashboard with live PyNVML data."""
         self.logger.log(data)
         self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
-        
-        if data.get('temp_hotspot') is not None:
-            self.lbl_hotspot.setText(f"Hotspot: {data['temp_hotspot']} °C")
+
+        if data.get('temp_memory') is not None:
+            self.lbl_mem_temp.setText(f"Mem Temp: {data['temp_memory']:.0f} °C")
         else:
-            self.lbl_hotspot.setText("Hotspot: N/A")
-        
+            self.lbl_mem_temp.setText("Mem Temp: N/A")
+
+        if data.get('temp_headroom_c') is not None:
+            self.lbl_headroom.setText(
+                f"Thermal Headroom: {data['temp_headroom_c']:.0f} °C"
+            )
+        else:
+            self.lbl_headroom.setText("Thermal Headroom: N/A")
+
         self.lbl_power.setText(f"Power: {data['power_w']} W")
         self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
         self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
@@ -176,9 +185,9 @@ class MainWindow(QMainWindow):
         self.trainer.start()
 
     def stop_benchmark(self):
-        """Stops the benchmark if running."""
+        """Requests an early stop; the run ends at the next step boundary."""
         if self.trainer and self.trainer.isRunning():
-            self.log_to_console("\nStopping benchmark...")
+            self.log_to_console("\nStop requested — finishing current step...")
             self.trainer.stop()
         self.btn_stop.setEnabled(False)
 
@@ -188,7 +197,13 @@ class MainWindow(QMainWindow):
         df = self.logger.stop()
         if df is not None:
             self._render_plots(df, summary)
-        self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
+        if summary.get('aborted'):
+            self.log_to_console(
+                f"\nBenchmark stopped early: {summary['total_steps']}"
+                f"/{summary['requested_steps']} steps in {summary['elapsed_time_sec']}s"
+            )
+        else:
+            self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
         self.btn_start.setEnabled(True)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
@@ -254,8 +269,13 @@ class MainWindow(QMainWindow):
         
         steps_per_sec = summary['steps_per_sec']
         efficiency = steps_per_sec / avg_power if avg_power > 0 else 0
-        
+
+        steps_label = f"{summary['total_steps']}"
+        if summary.get('aborted'):
+            steps_label += f" of {summary['requested_steps']} (stopped early)"
+
         metrics = [
+            ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
             ("Steps/sec", f"{steps_per_sec:.2f}"),
             ("Efficiency (steps/sec/W)", f"{efficiency:.4f}"),
@@ -266,6 +286,14 @@ class MainWindow(QMainWindow):
             ("Avg VRAM (MiB)", f"{avg_vram:.1f}"),
             ("Peak VRAM (MiB)", f"{peak_vram:.1f}"),
         ]
+
+        # Memory temperature is only present on GPUs that expose the field.
+        if 'temp_memory' in df.columns and df['temp_memory'].notna().any():
+            metrics.append(("Max Mem Temp (°C)", f"{df['temp_memory'].max():.0f}"))
+        if 'temp_headroom_c' in df.columns and df['temp_headroom_c'].notna().any():
+            metrics.append(
+                ("Min Thermal Headroom (°C)", f"{df['temp_headroom_c'].min():.0f}")
+            )
         
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):
@@ -280,11 +308,15 @@ class MainWindow(QMainWindow):
 
     def export_results(self):
         """Exports the last benchmark's telemetry to CSV and renders plot PNG."""
-        df = self.logger.stop()
+        df = self.logger.to_dataframe()
         if df is None:
             self.log_to_console("No data to export.")
             return
-        csv_path, plot_path = BenchmarkLogger.export(df)
+        try:
+            csv_path, plot_path = BenchmarkLogger.export(df)
+        except OSError as e:
+            self.log_to_console(f"Export failed: {e}")
+            return
         self.log_to_console(f"Exported: {csv_path}")
         self.log_to_console(f"Exported: {plot_path}")
 
@@ -292,5 +324,7 @@ class MainWindow(QMainWindow):
         """Clean up threads on exit."""
         self.telemetry.stop()
         if self.trainer and self.trainer.isRunning():
-            self.trainer.stop()
+            # Shutdown is the one place we genuinely must block, so the
+            # training thread cannot outlive the window it reports into.
+            self.trainer.wait_for_exit()
         event.accept()
