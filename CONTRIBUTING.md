@@ -42,9 +42,9 @@ Four blocks, roughly ordered — later ones build on earlier ones, and each is a
 
 Self-contained, a file or two each. Good first PRs.
 
-- **Fan and PCIe telemetry.** NVML exposes fan RPM/PWM% and PCIe generation × width (Gen4 x16 and so on). Add them to `TelemetryWorker` and the dashboard — the field-value plumbing in `telemetry.py` already handles "this card doesn't support it".
-- **Theming.** Colours currently sit in inline `setStyleSheet()` calls scattered across `main_window.py`. Collect them into one stylesheet; a dark/light toggle becomes easy afterwards.
-- **`mypy` in CI.** Types are already partly there. A job in the existing workflow would catch signal/slot mismatches early.
+- **Fan and clock curves on the plots.** Fan duty cycle already reaches the CSV and the summary table, but nothing draws it. It shares a percentage axis with GPU utilization, so it's one more line on the "Utilization & Clock" plot in both `main_window._render_plots()` and `logger._generate_plot()` — guarded by `.notna().any()`, since passively cooled cards report nothing.
+- **Theming.** Colours sit in inline `setStyleSheet()` calls scattered across `main_window.py`, and two of them are swapped at runtime to mark the Start button busy. A side effect is that disabled buttons look exactly like enabled ones. Give the widgets object names, move everything into one stylesheet with `:disabled` selectors, and the runtime swapping disappears along with the bug. A dark/light toggle gets easy afterwards.
+- **`mypy` in CI.** Types are already partly there. A job in the existing workflow would catch signal/slot mismatches early. Expect to start it non-blocking: nobody has run mypy over this code yet, so the first pass decides how much is worth fixing up front.
 
 ### 2. A configurable run
 
