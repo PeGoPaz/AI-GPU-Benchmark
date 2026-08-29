@@ -9,7 +9,6 @@ torch>=2.2.0
 transformers>=4.40.0
 peft>=0.10.0
 datasets>=2.18.0
-trl>=0.8.0
 
 # Visualization & Data
 matplotlib>=3.8.0
