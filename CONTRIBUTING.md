@@ -1,31 +1,22 @@
-# Contributing to AI-GPU-Benchmark
+# Contributing
 
-Thanks for your interest in contributing! This project is a PyQt6 desktop app for stress-testing NVIDIA GPUs under AI training workloads and capturing real-time telemetry.
+AI-GPU-Benchmark is a PyQt6 desktop app that hammers an NVIDIA GPU with a LoRA fine-tune and records what the card does while it happens. Contributions are welcome — here's what you need to know.
 
-## Getting started
+## Setup
 
 ```bash
 git clone https://github.com/PeGoPaz/AI-GPU-Benchmark.git
 cd AI-GPU-Benchmark
-python -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
 
-Requirements: Python 3.10+, NVIDIA GPU with CUDA, NVIDIA drivers with NVML support.
+Running the app for real needs Python 3.10+, an NVIDIA GPU and drivers with NVML. Working on it doesn't — see below.
 
-## Coding conventions
+## Tests
 
-- PyQt6 for all UI
-- QThread for anything blocking (NVML polling, training) — never run long work on the main thread
-- Signals/slots for cross-thread communication
-- No file I/O during a benchmark run; the logger keeps telemetry in memory and only writes on explicit export
-- Keep tests hardware-free: stub the ML stack and NVML rather than requiring a GPU
-
-## Tests and linting
-
-The dev tooling is not in `requirements.txt` — install it separately:
+The dev tools aren't in `requirements.txt`:
 
 ```bash
 pip install pytest ruff
@@ -33,66 +24,45 @@ ruff check .
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`tests/conftest.py` stubs torch, transformers, peft and datasets before any `app.*` module is imported, and the NVML calls are mocked per test, so the suite runs anywhere. Tests that construct the real window are marked `ui` and skip themselves when Qt cannot start headless.
+`tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. CI does the same on every push and PR: ruff (pinned to 0.16.5), a parse check, and pytest on Python 3.10 and 3.13.
 
-CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff pinned to 0.16.5, `python -m compileall`, and pytest on Python 3.10 and 3.13. The lint rule set lives in `ruff.toml` and is pinned explicitly so a Ruff upgrade cannot turn CI red on its own.
+## House rules
 
-## Pull requests
+- All UI is PyQt6. Anything that blocks — NVML polling, training — lives in a QThread and reports back over signals. The window must never freeze.
+- Nothing touches disk mid-run. The logger keeps telemetry in memory and writes only when the user presses Export.
+- Tests stay hardware-free: mock the GPU rather than requiring one.
+- One logical change per PR, ruff and pytest green, and update `README.md` if users would notice the difference.
 
-1. Fork the repo and create a feature branch
-2. One logical change per PR
-3. Run `ruff check .` and `pytest` locally before opening it — both must stay green
-4. Add or update tests when you change behaviour
-5. Keep the GUI responsive during long operations
-6. Update `README.md` if your change affects user-facing behaviour
+## What to work on
 
----
+Four blocks, roughly ordered — later ones build on earlier ones, and each is a sensible chunk of work by itself. Open an issue before starting anything large so we don't duplicate effort.
 
-## Wanted features
+### 1. Warm-ups
 
-These are the things I most want to add. Pick whichever matches your interests — feel free to open an issue before you start so we can align on scope.
+Self-contained, a file or two each. Good first PRs.
 
-### High priority
+- **Fan and PCIe telemetry.** NVML exposes fan RPM/PWM% and PCIe generation × width (Gen4 x16 and so on). Add them to `TelemetryWorker` and the dashboard — the field-value plumbing in `telemetry.py` already handles "this card doesn't support it".
+- **Theming.** Colours currently sit in inline `setStyleSheet()` calls scattered across `main_window.py`. Collect them into one stylesheet; a dark/light toggle becomes easy afterwards.
+- **`mypy` in CI.** Types are already partly there. A job in the existing workflow would catch signal/slot mismatches early.
 
-#### Configurable workload
-Right now the benchmark hardcodes TinyLlama-1.1B, 150 steps, batch_size=4, and BF16. Add UI controls (dropdowns, spin boxes) to pick:
-- Model (TinyLlama, Phi, Mistral, etc.)
-- Step count
-- Batch size
+### 2. A configurable run
 
-#### Warmup phase
-The first few steps include model loading and CUDA compilation overhead that skews throughput averages. Run N warmup steps (configurable, default ~10) before starting the timer.
+The gateway to most of the rest: model, step count, batch size and precision are all hardcoded today.
 
-#### Multi-run batch mode
-Run 3–5 consecutive benchmarks, average the stats, and discard outliers. Standard practice for reliable benchmarking.
+- **Settings panel.** Dropdowns and spin boxes for model (TinyLlama, Phi, Mistral…), step count and batch size, feeding `TrainerWorker` instead of the constants in `start_benchmark()`.
+- **Warm-up steps.** The first few steps carry model loading and CUDA compilation overhead and skew the throughput average. Run ~10 warm-up steps (configurable) before starting the timer.
+- **Precision toggle.** BF16 / FP16 / FP32, later INT8/INT4 via `bitsandbytes` — one more control in the same panel, and a genuinely interesting axis to measure.
 
-#### Inference benchmark
-Training is only half the AI lifecycle. Add a second benchmark mode that measures tokens/sec (generation) and Time-To-First-Token using a standard prompt. Many people care more about inference performance than training.
+### 3. Results worth keeping
 
-### Medium priority
+- **Run report.** One Markdown or JSON file per run: GPU, settings, final stats, paths to the CSV and PNG. Makes results shareable, and gives the next two features a stable format to read.
+- **Multi-run mode.** Three to five runs back to back, averaged, outliers dropped — the only way the numbers really mean anything. Needs the parameterised run from block 2.
+- **Historical overlay.** Load a previous run's CSV and draw its curves behind the current ones, to compare against your own baseline or someone else's card.
 
-#### Precision comparison
-Let the user toggle between BF16, FP16, and FP32, or quantized (INT8/INT4 via `bitsandbytes`), to see how precision affects throughput, VRAM usage, and power draw.
+### 4. Inference benchmark
 
-#### Historical overlay
-Load a previous run's exported CSV and overlay its thermal/power curves on the current plot. Useful for comparing a new run against a baseline or another contributor's hardware.
+The big one. Training is half the picture; plenty of people care more about tokens/sec and time-to-first-token. This is a second benchmark mode with its own worker, metrics and summary — build it on the settings panel and report format from blocks 2 and 3.
 
-#### PCIe and fan telemetry
-Add fan RPM/PWM% and PCIe generation × width (e.g., Gen4 x16) to the telemetry dashboard via NVML. PCIe bandwidth is relevant for large model loading.
+## Questions
 
-#### Export report
-Generate a single Markdown or JSON file summarising a run: GPU name, settings, final stats, and paths to the CSV/plot. Useful for posting results or sharing across a community.
-
-### Nice to have
-
-#### `mypy` in CI
-Types are already partly in the codebase. Adding a `mypy` job to the existing CI workflow (and a matching pre-commit hook) would catch signal/slot mismatches and other issues early.
-
-#### Theming
-A dark/light mode toggle, or at minimum a stylesheet system that doesn't require digging into inline `styleSheet()` calls.
-
----
-
-## Questions?
-
-Open an issue or reach out via GitHub Discussions. If you're unsure whether something is in scope, ask first — it's easier than doing the work and having it rejected.
+Open an issue or start a discussion. If you're unsure whether something's in scope, ask first — cheaper than building it and having it turned down.
