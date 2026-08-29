@@ -245,3 +245,45 @@ def test_button_styles_are_not_swapped_at_runtime(started_run):
     started_run.trainer.error_occurred.emit("HF Training Error: boom")
 
     assert started_run.btn_start.styleSheet() == ""
+
+
+def _util_plot_labels(window):
+    """Series names across both axes — the clock sits on the twin."""
+    return [line.get_label()
+            for axes in window.util_canvas.figure.axes
+            for line in axes.get_lines()]
+
+
+def _finish_run(window, telemetry_sample, n=5, **overrides):
+    window.logger.start()
+    for i in range(n):
+        window.logger.log(telemetry_sample(i, **overrides))
+    window.on_benchmark_finished({
+        "total_steps": 150, "requested_steps": 150, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 2.14,
+    })
+
+
+def test_fan_curve_is_plotted(window, telemetry_sample):
+    _finish_run(window, telemetry_sample)
+
+    assert "Fan (%)" in _util_plot_labels(window)
+
+
+def test_passive_card_plots_no_fan_curve(window, telemetry_sample):
+    """A column of None must leave the plot alone, not draw a flat empty line."""
+    _finish_run(window, telemetry_sample, fan_speed_pct=None)
+
+    labels = _util_plot_labels(window)
+    assert "Fan (%)" not in labels
+    assert "GPU Utilization (%)" in labels
+
+
+def test_percentages_and_clock_use_separate_axes(window, telemetry_sample):
+    """Sharing one axis with a ~2500 MHz clock flattened every percentage
+    curve onto the zero line, which made the fan and utilization unreadable."""
+    _finish_run(window, telemetry_sample)
+
+    percent_axes, clock_axes = window.util_canvas.figure.axes
+    assert percent_axes.get_ylim() == (0, 105)
+    assert [line.get_label() for line in clock_axes.get_lines()] == ["SM Clock (MHz)"]

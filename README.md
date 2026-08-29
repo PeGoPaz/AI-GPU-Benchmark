@@ -50,7 +50,7 @@ The GUI window opens with:
 - A "Start Stress Test" button — launches a LoRA fine-tuning run on TinyLlama-1.1B
 - An execution log and progress bar tracking the training loop
 - A "Stop" button that ends the run at the next step boundary without freezing the window
-- On completion, two tabbed graphs rendered directly in the window — **Thermal & Power** and **Utilization & Clock** — alongside a **Benchmark Summary** table
+- On completion, two tabbed graphs rendered directly in the window — **Thermal & Power** and **Utilization, Clock & Fan** — alongside a **Benchmark Summary** table
 - An "Export Results" button that writes the finished run to `logs/` as CSV + PNG
 
 ---
@@ -131,4 +131,4 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 
 ## Output
 
-After each benchmark, the thermal/power and utilization/clock curves and a summary table are displayed inline in the GUI. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) a 150-step run ends before anything is written there. Both directories are gitignored.
+After each benchmark, both graphs and a summary table are displayed inline in the GUI. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) a 150-step run ends before anything is written there. Both directories are gitignored.

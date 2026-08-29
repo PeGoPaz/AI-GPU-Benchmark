@@ -83,12 +83,30 @@ class BenchmarkLogger:
         # --- Bottom: Utilization & Clock ---
         ax3.plot(df['time_sec'], df['gpu_util_pct'], color='#ffa500',
                  label='GPU Utilization (%)', linewidth=2)
-        ax3.plot(df['time_sec'], df['sm_clock_mhz'], color='#00bfff',
-                 label='SM Clock (MHz)', linewidth=2, linestyle='--')
+
+        # Fan duty cycle belongs on the percentage axis beside utilization.
+        # Absent on passively cooled cards, so it is drawn only when collected.
+        if 'fan_speed_pct' in df.columns and df['fan_speed_pct'].notna().any():
+            ax3.plot(df['time_sec'], df['fan_speed_pct'], color='#a06bff',
+                     label='Fan (%)', linewidth=2, linestyle=':')
+
         ax3.set_xlabel('Time (seconds)')
-        ax3.set_ylabel('Utilization (%)')
-        ax3.set_title('Utilization & Clock Speed')
-        ax3.legend(loc='upper left')
+        ax3.set_ylabel('Utilization / Fan (%)')
+        ax3.set_ylim(0, 105)
+        ax3.set_title('Utilization, Clock & Fan')
+
+        # The clock needs its own axis: at ~2500 MHz it shares no useful scale
+        # with percentages, and plotting both on one axis flattened every
+        # percentage curve onto the zero line.
+        ax4 = ax3.twinx()
+        ax4.plot(df['time_sec'], df['sm_clock_mhz'], color='#00bfff',
+                 label='SM Clock (MHz)', linewidth=2, linestyle='--')
+        ax4.set_ylabel('Clock (MHz)', color='#00bfff')
+        ax4.tick_params(axis='y', labelcolor='#00bfff')
+
+        lines_3, labels_3 = ax3.get_legend_handles_labels()
+        lines_4, labels_4 = ax4.get_legend_handles_labels()
+        ax3.legend(lines_3 + lines_4, labels_3 + labels_4, loc='upper left')
         ax3.grid(True, alpha=0.2)
 
         plt.tight_layout()

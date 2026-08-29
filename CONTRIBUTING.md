@@ -43,7 +43,7 @@ Four blocks, roughly ordered — later ones build on earlier ones, and each is a
 
 Self-contained, a file or two each. Good first PRs.
 
-- **Fan and clock curves on the plots.** Fan duty cycle already reaches the CSV and the summary table, but nothing draws it. It shares a percentage axis with GPU utilization, so it's one more line on the "Utilization & Clock" plot in both `main_window._render_plots()` and `logger._generate_plot()` — guarded by `.notna().any()`, since passively cooled cards report nothing.
+- **Unify the two plotting paths.** `main_window._render_plots()` draws the tabs and `logger._generate_plot()` draws the exported PNG, and they now render the same two panels with the same series, differing only in figure layout. Every change to a chart has to be made twice, in two modules. Pull the per-panel drawing into shared functions that take an axes and a DataFrame.
 - **Dark/light toggle.** `app/ui/style.py` keeps the palette as constants and builds `STYLESHEET` from them, so a second theme is a second palette plus a menu action that re-applies the sheet. The part worth thinking about is where the choice is remembered between runs; `QSettings` is the obvious answer.
 - **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 33 gaps and `--strict` reports 64, nearly all of them a mechanical `-> None` on a Qt slot. Add them a module at a time, tightening the config as each one goes clean.
 

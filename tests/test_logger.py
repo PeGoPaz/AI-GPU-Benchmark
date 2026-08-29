@@ -73,3 +73,15 @@ def test_export_csv_contains_telemetry_columns(telemetry_sample, tmp_path):
     header = open(csv_path).readline()
     for column in ("temp_gpu", "temp_memory", "temp_headroom_c", "power_w", "time_sec"):
         assert column in header
+
+
+def test_exported_plot_survives_a_card_without_fans(telemetry_sample, tmp_path):
+    """The fan series is optional; an all-None column must not break export."""
+    lg = BenchmarkLogger()
+    lg.start()
+    for i in range(5):
+        lg.log(telemetry_sample(i, fan_speed_pct=None, fan_rpm=None))
+
+    _, png_path = BenchmarkLogger.export(lg.stop(), output_dir=str(tmp_path))
+
+    assert os.path.getsize(png_path) > 0
