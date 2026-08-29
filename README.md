@@ -93,6 +93,7 @@ tests/                         — pytest suite; the ML stack and NVML are stubb
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 requirements.txt               — runtime dependencies
+requirements-dev.txt           — test and lint tooling (no ML stack)
 ```
 
 ---
@@ -114,12 +115,12 @@ requirements.txt               — runtime dependencies
 The test suite replaces torch, transformers, peft, datasets and NVML with stubs, so it runs on any machine — no GPU and no multi-gigabyte install required:
 
 ```bash
-pip install pytest ruff
+pip install -r requirements-dev.txt
 ruff check .
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff (pinned to 0.16.5), a `compileall` parse check, and the test suite on Python 3.10 and 3.13.
+`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff (pinned to 0.16.5), a `compileall` parse check, and the test suite on Python 3.10 and 3.13.
 
 ---
 

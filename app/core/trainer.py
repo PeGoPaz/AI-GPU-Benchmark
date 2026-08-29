@@ -40,7 +40,7 @@ class TrainerWorker(QThread):
     error_occurred = pyqtSignal(str)
     max_steps_ready = pyqtSignal(int)
 
-    def __init__(self, steps: int = 200, batch_size: int = 4, parent=None):
+    def __init__(self, steps: int = 150, batch_size: int = 4, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size

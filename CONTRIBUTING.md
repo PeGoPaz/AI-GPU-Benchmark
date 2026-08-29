@@ -16,10 +16,11 @@ Running the app for real needs Python 3.10+, an NVIDIA GPU and drivers with NVML
 
 ## Tests
 
-The dev tools aren't in `requirements.txt`:
+The dev tooling lives in its own file, so you can work on the project
+without a 2 GB torch install:
 
 ```bash
-pip install pytest ruff
+pip install -r requirements-dev.txt
 ruff check .
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
