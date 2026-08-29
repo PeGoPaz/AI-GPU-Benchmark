@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from app.core.telemetry import TelemetryWorker
 from app.core.trainer import TrainerWorker
+from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
 
 
@@ -51,7 +52,7 @@ class MainWindow(QMainWindow):
         for lbl in [self.lbl_temp, self.lbl_mem_temp, self.lbl_headroom,
                     self.lbl_power, self.lbl_clock, self.lbl_vram,
                     self.lbl_fan, self.lbl_pcie]:
-            lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
+            lbl.setProperty("role", "metric")
             hw_layout.addWidget(lbl)
 
         hw_group.setLayout(hw_layout)
@@ -62,19 +63,19 @@ class MainWindow(QMainWindow):
         ctrl_layout = QVBoxLayout()
 
         self.btn_start = QPushButton("Start Stress Test")
+        self.btn_start.setObjectName("btnStart")
         self.btn_start.setMinimumHeight(40)
-        self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
         self.btn_start.clicked.connect(self.start_benchmark)
 
         self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setObjectName("btnStop")
         self.btn_stop.setMinimumHeight(35)
-        self.btn_stop.setStyleSheet("background-color: #8B0000; color: white; font-weight: bold;")
         self.btn_stop.clicked.connect(self.stop_benchmark)
         self.btn_stop.setEnabled(False)
 
         self.btn_export = QPushButton("Export Results")
+        self.btn_export.setObjectName("btnExport")
         self.btn_export.setMinimumHeight(35)
-        self.btn_export.setStyleSheet("background-color: #4682B4; color: white;")
         self.btn_export.clicked.connect(self.export_results)
         self.btn_export.setEnabled(False)
 
@@ -89,9 +90,9 @@ class MainWindow(QMainWindow):
         right_panel = QVBoxLayout()
 
         self.console = QTextEdit()
+        self.console.setObjectName("console")
         self.console.setReadOnly(True)
         self.console.setMaximumHeight(180)
-        self.console.setStyleSheet("background-color: #1E1E1E; color: #00FF00; font-family: monospace;")
         self.log_to_console("System initialized. Ready for benchmark.")
 
         self.progress_bar = QProgressBar()
@@ -134,6 +135,9 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(left_panel, 1)
         main_layout.addLayout(right_panel, 2)
+
+        # Applied last, so every widget above is polished in one pass.
+        self.setStyleSheet(STYLESHEET)
 
         # --- INITIALIZE THREADS ---
         self.logger = BenchmarkLogger()
@@ -219,7 +223,6 @@ class MainWindow(QMainWindow):
     def start_benchmark(self):
         """Disables UI and fires up the PyTorch training thread."""
         self.btn_start.setEnabled(False)
-        self.btn_start.setStyleSheet("background-color: #555555; color: white;")
         self.btn_stop.setEnabled(True)
         self.btn_export.setEnabled(False)
         self.progress_bar.setValue(0)
@@ -280,7 +283,6 @@ class MainWindow(QMainWindow):
         """Returns the control panel to its ready-for-a-new-run state."""
         self.btn_stop.setEnabled(False)
         self.btn_start.setEnabled(True)
-        self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
 
     def _render_plots(self, df, summary: dict):
         """Draws thermal/power and utilization/clock plots into tabs."""

@@ -85,6 +85,7 @@ main.py                        — entry point, launches the PyQt6 app
 app/
   ui/
     main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
+    style.py                   — palette and the single application stylesheet
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion

@@ -44,7 +44,7 @@ Four blocks, roughly ordered — later ones build on earlier ones, and each is a
 Self-contained, a file or two each. Good first PRs.
 
 - **Fan and clock curves on the plots.** Fan duty cycle already reaches the CSV and the summary table, but nothing draws it. It shares a percentage axis with GPU utilization, so it's one more line on the "Utilization & Clock" plot in both `main_window._render_plots()` and `logger._generate_plot()` — guarded by `.notna().any()`, since passively cooled cards report nothing.
-- **Theming.** Colours sit in inline `setStyleSheet()` calls scattered across `main_window.py`, and two of them are swapped at runtime to mark the Start button busy. A side effect is that disabled buttons look exactly like enabled ones. Give the widgets object names, move everything into one stylesheet with `:disabled` selectors, and the runtime swapping disappears along with the bug. A dark/light toggle gets easy afterwards.
+- **Dark/light toggle.** `app/ui/style.py` keeps the palette as constants and builds `STYLESHEET` from them, so a second theme is a second palette plus a menu action that re-applies the sheet. The part worth thinking about is where the choice is remembered between runs; `QSettings` is the obvious answer.
 - **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 33 gaps and `--strict` reports 64, nearly all of them a mechanical `-> None` on a Qt slot. Add them a module at a time, tightening the config as each one goes clean.
 
 ### 2. A configurable run

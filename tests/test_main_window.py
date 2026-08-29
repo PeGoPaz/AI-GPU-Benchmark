@@ -223,3 +223,25 @@ def test_summary_reports_peak_fan_and_link(window, telemetry_sample):
     rows = _summary_rows(window)
     assert rows["Peak Fan (%)"] == "64"
     assert rows["PCIe Link (peak)"] == "Gen4 x16"
+
+
+def test_disabled_buttons_drain_their_background(window):
+    """Qt on its own only dims the label text. Against a saturated fill that
+    was far too weak: a disabled Stop button still read as a live one."""
+    for button in (window.btn_start, window.btn_stop, window.btn_export):
+        button.setEnabled(True)
+        live = button.grab().toImage().pixelColor(button.width() // 2, 4)
+        button.setEnabled(False)
+        dead = button.grab().toImage().pixelColor(button.width() // 2, 4)
+
+        assert live != dead, button.objectName()
+
+
+def test_button_styles_are_not_swapped_at_runtime(started_run):
+    """Busy state is a :disabled selector now, not code rewriting stylesheets
+    on every transition — which the finish and error paths both had to undo."""
+    assert started_run.btn_start.styleSheet() == ""
+
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert started_run.btn_start.styleSheet() == ""
