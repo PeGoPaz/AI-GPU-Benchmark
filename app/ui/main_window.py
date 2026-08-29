@@ -134,9 +134,11 @@ class MainWindow(QMainWindow):
 
         # --- INITIALIZE THREADS ---
         self.logger = BenchmarkLogger()
+        self._last_telemetry_error = None
         self.telemetry = TelemetryWorker(interval_ms=250)
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
+        self.telemetry.error_occurred.connect(self._on_telemetry_error)
         self.telemetry.start()
 
         self.trainer = None
@@ -150,6 +152,19 @@ class MainWindow(QMainWindow):
         """Updates the window title once the GPU name is detected."""
         self.setWindowTitle(f"AI GPU Benchmark — {gpu_name}")
         self.log_to_console(f"Detected GPU: {gpu_name}")
+
+    @pyqtSlot(str)
+    def _on_telemetry_error(self, message: str):
+        """Surfaces NVML failures instead of leaving the dashboard on '--'.
+
+        Read errors repeat on every poll, so an identical consecutive message
+        is swallowed rather than filling the console with the same line four
+        times a second.
+        """
+        if message == self._last_telemetry_error:
+            return
+        self._last_telemetry_error = message
+        self.log_to_console(f"TELEMETRY ERROR: {message}")
 
     @pyqtSlot(dict)
     def update_telemetry_ui(self, data: dict):
@@ -190,7 +205,7 @@ class MainWindow(QMainWindow):
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
         self.trainer.max_steps_ready.connect(lambda steps: self.progress_bar.setRange(0, steps))
         self.trainer.training_finished.connect(self.on_benchmark_finished)
-        self.trainer.error_occurred.connect(lambda err: self.log_to_console(f"ERROR: {err}"))
+        self.trainer.error_occurred.connect(self.on_benchmark_error)
         self.trainer.start()
 
     def stop_benchmark(self):
@@ -214,9 +229,30 @@ class MainWindow(QMainWindow):
         else:
             self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
+        self._set_idle_controls()
+        self.btn_export.setEnabled(True)
+
+    @pyqtSlot(str)
+    def on_benchmark_error(self, message: str):
+        """Recovers the UI from a failed run.
+
+        TrainerWorker.run() emits error_occurred and returns without ever
+        emitting training_finished, so nothing else re-enables the controls:
+        before this, any training failure left Start greyed out for good and
+        the app had to be restarted.
+        """
+        self.log_to_console(f"ERROR: {message}")
+        # Close the run, or its partial telemetry leaks into the next one.
+        df = self.logger.stop()
+        self.progress_bar.setValue(0)
+        self._set_idle_controls()
+        self.btn_export.setEnabled(df is not None)
+
+    def _set_idle_controls(self):
+        """Returns the control panel to its ready-for-a-new-run state."""
+        self.btn_stop.setEnabled(False)
         self.btn_start.setEnabled(True)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
-        self.btn_export.setEnabled(True)
 
     def _render_plots(self, df, summary: dict):
         """Draws thermal/power and utilization/clock plots into tabs."""
