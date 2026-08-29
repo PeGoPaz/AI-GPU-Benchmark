@@ -21,13 +21,30 @@ Requirements: Python 3.10+, NVIDIA GPU with CUDA, NVIDIA drivers with NVML suppo
 - QThread for anything blocking (NVML polling, training) — never run long work on the main thread
 - Signals/slots for cross-thread communication
 - No file I/O during a benchmark run; the logger keeps telemetry in memory and only writes on explicit export
+- Keep tests hardware-free: stub the ML stack and NVML rather than requiring a GPU
+
+## Tests and linting
+
+The dev tooling is not in `requirements.txt` — install it separately:
+
+```bash
+pip install pytest ruff
+ruff check .
+QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
+```
+
+`tests/conftest.py` stubs torch, transformers, peft and datasets before any `app.*` module is imported, and the NVML calls are mocked per test, so the suite runs anywhere. Tests that construct the real window are marked `ui` and skip themselves when Qt cannot start headless.
+
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff pinned to 0.16.5, `python -m compileall`, and pytest on Python 3.10 and 3.13. The lint rule set lives in `ruff.toml` and is pinned explicitly so a Ruff upgrade cannot turn CI red on its own.
 
 ## Pull requests
 
 1. Fork the repo and create a feature branch
 2. One logical change per PR
-3. Keep the GUI responsive during long operations
-4. Update `README.md` if your change affects user-facing behaviour
+3. Run `ruff check .` and `pytest` locally before opening it — both must stay green
+4. Add or update tests when you change behaviour
+5. Keep the GUI responsive during long operations
+6. Update `README.md` if your change affects user-facing behaviour
 
 ---
 
@@ -68,11 +85,8 @@ Generate a single Markdown or JSON file summarising a run: GPU name, settings, f
 
 ### Nice to have
 
-#### GitHub Actions CI
-A basic workflow that runs `ruff` (or `flake8`) and checks that all Python files parse on PRs.
-
-#### `mypy` pre-commit hook
-Types are already in the codebase. A pre-commit or CI step running `mypy` would catch signal/slot mismatches and other issues early.
+#### `mypy` in CI
+Types are already partly in the codebase. Adding a `mypy` job to the existing CI workflow (and a matching pre-commit hook) would catch signal/slot mismatches and other issues early.
 
 #### Theming
 A dark/light mode toggle, or at minimum a stylesheet system that doesn't require digging into inline `styleSheet()` calls.

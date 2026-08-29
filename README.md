@@ -1,5 +1,7 @@
 # AI-GPU-Benchmark
 
+[![CI](https://github.com/PeGoPaz/AI-GPU-Benchmark/actions/workflows/ci.yml/badge.svg)](https://github.com/PeGoPaz/AI-GPU-Benchmark/actions/workflows/ci.yml)
+
 GPU benchmarking tool — measures AI training throughput via LoRA fine-tuning and monitors real-time GPU telemetry on NVIDIA cards.
 
 ---
@@ -43,18 +45,19 @@ python main.py
 
 The GUI window opens with:
 
-- A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, VRAM, power, clock speed)
+- A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, power, clock speed, VRAM) that begins polling as soon as the app starts
+- Automatic GPU name detection shown in the window title
 - A "Start Stress Test" button — launches a LoRA fine-tuning run on TinyLlama-1.1B
 - An execution log and progress bar tracking the training loop
 - A "Stop" button that ends the run at the next step boundary without freezing the window
-- On completion, an in-app thermal & power curve graph rendered directly in the window
-- Automatic GPU name detection shown in the window title
+- On completion, two tabbed graphs rendered directly in the window — **Thermal & Power** and **Utilization & Clock** — alongside a **Benchmark Summary** table
+- An "Export Results" button that writes the finished run to `logs/` as CSV + PNG
 
 ---
 
 ## How It Works
 
-The benchmark runs a 150-step LoRA fine-tune (bfloat16) on a small English quotes dataset using Hugging Face Transformers and PEFT. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI which renders a dual-axis matplotlib plot. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
+The benchmark runs a 150-step LoRA fine-tune (bfloat16, rank 8, `q_proj`/`v_proj`) on a small English quotes dataset using Hugging Face Transformers and PEFT. The per-device batch size is 4 with 4 gradient accumulation steps, for an effective batch of 16. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus throughput and efficiency in steps/sec/W. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
 
 Throughput is computed from the steps that actually completed, so stopping a run early reports its real steps/sec instead of overstating it.
 
@@ -79,12 +82,17 @@ Both display `N/A` on hardware that does not support the field.
 main.py                        — entry point, launches the PyQt6 app
 app/
   ui/
-    main_window.py             — GUI layout, thread wiring, embedded plot canvas, console log
+    main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion
   utils/
-    logger.py                  — BenchmarkLogger: collects telemetry in memory, returns DataFrame for in-app plotting
+    logger.py                  — BenchmarkLogger: collects telemetry in memory, returns a DataFrame, exports CSV + PNG
+tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
+.github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
+pytest.ini                     — pytest configuration
+ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
+requirements.txt               — runtime dependencies
 ```
 
 ---
@@ -95,11 +103,26 @@ app/
 |---|---|
 | UI | PyQt6 |
 | GPU monitoring | nvidia-ml-py (PyNVML) |
-| ML training | PyTorch, Transformers, PEFT, TRL, datasets |
+| ML training | PyTorch, Transformers, PEFT, datasets |
 | Data & plotting | pandas, matplotlib |
+| Tests & linting | pytest, ruff |
+
+---
+
+## Development
+
+The test suite replaces torch, transformers, peft, datasets and NVML with stubs, so it runs on any machine — no GPU and no multi-gigabyte install required:
+
+```bash
+pip install pytest ruff
+ruff check .
+QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
+```
+
+Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff (pinned to 0.16.5), a `compileall` parse check, and the test suite on Python 3.10 and 3.13.
 
 ---
 
 ## Output
 
-After each benchmark, the thermal & power curves and a summary table are displayed inline in the GUI. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV and plot PNG to `logs/`, and can be pressed repeatedly for the same run. The `results/` directory receives HF checkpoint artifacts from the Trainer during training, but the model is offloaded from VRAM once the run completes.
+After each benchmark, the thermal/power and utilization/clock curves and a summary table are displayed inline in the GUI. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) a 150-step run ends before anything is written there. Both directories are gitignored.
