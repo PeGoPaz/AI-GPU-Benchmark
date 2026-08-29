@@ -33,6 +33,12 @@ def telemetry_sample():
             "power_w": 250 + i,
             "gpu_util_pct": 98,
             "sm_clock_mhz": 2600,
+            "fan_speed_pct": 60 + i,
+            "fan_rpm": 1800 + i * 10,
+            "pcie_gen": 4,
+            "pcie_width": 16,
+            "pcie_gen_max": 4,
+            "pcie_width_max": 16,
         }
         s.update(overrides)
         return s

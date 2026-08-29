@@ -45,7 +45,7 @@ python main.py
 
 The GUI window opens with:
 
-- A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, power, clock speed, VRAM) that begins polling as soon as the app starts
+- A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, power, clock speed, VRAM, fan speed, PCIe link) that begins polling as soon as the app starts
 - Automatic GPU name detection shown in the window title
 - A "Start Stress Test" button — launches a LoRA fine-tuning run on TinyLlama-1.1B
 - An execution log and progress bar tracking the training loop
@@ -57,7 +57,7 @@ The GUI window opens with:
 
 ## How It Works
 
-The benchmark runs a 150-step LoRA fine-tune (bfloat16, rank 8, `q_proj`/`v_proj`) on a small English quotes dataset using Hugging Face Transformers and PEFT. The per-device batch size is 4 with 4 gradient accumulation steps, for an effective batch of 16. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus throughput and efficiency in steps/sec/W. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
+The benchmark runs a 150-step LoRA fine-tune (bfloat16, rank 8, `q_proj`/`v_proj`) on a small English quotes dataset using Hugging Face Transformers and PEFT. The per-device batch size is 4 with 4 gradient accumulation steps, for an effective batch of 16. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock, fan speed, PCIe link) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus throughput and efficiency in steps/sec/W. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
 
 Throughput is computed from the steps that actually completed, so stopping a run early reports its real steps/sec instead of overstating it.
 
@@ -73,6 +73,8 @@ Instead the dashboard reports two values that NVML genuinely provides on Ampere 
 | Thermal Headroom | `NVML_FI_DEV_TEMPERATURE_GPU_MAX_TLIMIT` | Degrees remaining before the GPU throttles below base clock |
 
 Both display `N/A` on hardware that does not support the field.
+
+Fan speed and PCIe link follow the same rule. Fan duty cycle is reported as the highest across the card's fans — pegged at 100% means it has run out of thermal room — with RPM alongside it where the driver exposes that entry point; passively cooled datacenter cards show `N/A`. The PCIe link is polled rather than read once, because it downshifts at idle and comes back up under load; the maximum the slot supports is shown next to the current value whenever the two differ, so `Gen1 x16 (max Gen4 x16)` reads as an idling card rather than a broken slot.
 
 ---
 

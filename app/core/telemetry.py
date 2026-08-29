@@ -48,6 +48,48 @@ def read_field_values(handle, field_ids: list[int]) -> dict[int, float]:
     return result
 
 
+def _try_read(fn, *args):
+    """Calls an NVML getter, returning None when this GPU or driver lacks it.
+
+    Unlike the core temperature and power readings, fan and PCIe queries are
+    genuinely optional: passively cooled datacenter cards raise
+    NVML_ERROR_NOT_SUPPORTED for anything fan-related, and drivers older than
+    the RPM entry point raise NVML_ERROR_FUNCTION_NOT_FOUND. Neither should
+    cost us the rest of the snapshot.
+    """
+    try:
+        return fn(*args)
+    except Exception:
+        return None
+
+
+def read_fan_speed_pct(handle, num_fans: int | None) -> float | None:
+    """Highest fan duty cycle on the card, or None if it exposes no fans.
+
+    The maximum across fans is the number worth watching: fans pegged at 100%
+    mean the card has run out of thermal room. Cards that predate the indexed
+    getter still answer the unindexed one.
+    """
+    if not num_fans:
+        return _try_read(pynvml.nvmlDeviceGetFanSpeed, handle)
+
+    speeds = [speed for fan in range(num_fans)
+              if (speed := _try_read(pynvml.nvmlDeviceGetFanSpeed_v2, handle, fan))
+              is not None]
+    return max(speeds) if speeds else None
+
+
+def read_pcie_link(handle) -> tuple[int | None, int | None]:
+    """Current PCIe generation and width.
+
+    Polled rather than read once: the link drops to a lower generation at idle
+    to save power and comes back up under load, which is exactly the transition
+    a benchmark wants to show.
+    """
+    return (_try_read(pynvml.nvmlDeviceGetCurrPcieLinkGeneration, handle),
+            _try_read(pynvml.nvmlDeviceGetCurrPcieLinkWidth, handle))
+
+
 class TelemetryWorker(QThread):
     # Signals to pass hardware telemetry data back to the UI thread
     data_updated = pyqtSignal(dict)
@@ -74,6 +116,13 @@ class TelemetryWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(f"NVML Initialization Failed: {str(e)}")
             return
+
+        # Fixed for the lifetime of the card, so read them once rather than
+        # every 250 ms. The link maxima give the current values context: a
+        # Gen4 x16 card sitting at Gen1 x16 is idling, not misconfigured.
+        num_fans = _try_read(pynvml.nvmlDeviceGetNumFans, handle)
+        pcie_gen_max = _try_read(pynvml.nvmlDeviceGetMaxPcieLinkGeneration, handle)
+        pcie_width_max = _try_read(pynvml.nvmlDeviceGetMaxPcieLinkWidth, handle)
 
         while self._is_running:
             try:
@@ -107,6 +156,13 @@ class TelemetryWorker(QThread):
                     handle, pynvml.NVML_CLOCK_SM
                 )
 
+                # 7. Cooling and interconnect. Every one of these is optional
+                #    hardware, so a card without them reports None rather than
+                #    losing the whole snapshot.
+                fan_pct = read_fan_speed_pct(handle, num_fans)
+                fan_rpm = _try_read(pynvml.nvmlDeviceGetFanSpeedRPM, handle)
+                pcie_gen, pcie_width = read_pcie_link(handle)
+
                 # Package stats into a telemetry snapshot
                 telemetry = {
                     "timestamp": time.time(),
@@ -118,6 +174,12 @@ class TelemetryWorker(QThread):
                     "power_w": round(power, 2),
                     "gpu_util_pct": utilization.gpu,
                     "sm_clock_mhz": sm_clock,
+                    "fan_speed_pct": fan_pct,        # None if passively cooled
+                    "fan_rpm": fan_rpm,              # None on older drivers
+                    "pcie_gen": pcie_gen,
+                    "pcie_width": pcie_width,
+                    "pcie_gen_max": pcie_gen_max,
+                    "pcie_width_max": pcie_width_max,
                 }
 
                 # Broadcast data to UI

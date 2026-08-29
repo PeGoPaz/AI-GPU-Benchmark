@@ -185,3 +185,41 @@ def test_repeated_telemetry_errors_are_logged_once(window):
     text = window.console.toPlainText()
     assert text.count("fell off the bus") == 1
     assert "something else" in text
+
+
+def test_fan_and_pcie_labels_render(window, telemetry_sample):
+    window.update_telemetry_ui(telemetry_sample(0))
+
+    assert window.lbl_fan.text() == "Fan: 60% (1800 RPM)"
+    assert window.lbl_pcie.text() == "PCIe: Gen4 x16"
+
+
+def test_downshifted_pcie_link_shows_the_maximum(window, telemetry_sample):
+    """Gen1 at idle is normal — without the max it reads as a broken slot."""
+    window.update_telemetry_ui(telemetry_sample(0, pcie_gen=1))
+
+    assert window.lbl_pcie.text() == "PCIe: Gen1 x16 (max Gen4 x16)"
+
+
+def test_card_without_fans_or_pcie_data_renders_na(window, telemetry_sample):
+    window.update_telemetry_ui(telemetry_sample(0, fan_speed_pct=None,
+                                                fan_rpm=None, pcie_gen=None,
+                                                pcie_width=None))
+
+    assert window.lbl_fan.text() == "Fan: N/A"
+    assert window.lbl_pcie.text() == "PCIe: N/A"
+
+
+def test_summary_reports_peak_fan_and_link(window, telemetry_sample):
+    window.logger.start()
+    for i in range(5):
+        window.logger.log(telemetry_sample(i))
+
+    window.on_benchmark_finished({
+        "total_steps": 150, "requested_steps": 150, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 2.14,
+    })
+
+    rows = _summary_rows(window)
+    assert rows["Peak Fan (%)"] == "64"
+    assert rows["PCIe Link (peak)"] == "Gen4 x16"

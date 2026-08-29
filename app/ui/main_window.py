@@ -45,9 +45,12 @@ class MainWindow(QMainWindow):
         self.lbl_power = QLabel("Power: -- W")
         self.lbl_clock = QLabel("Clock: -- MHz")
         self.lbl_vram = QLabel("VRAM: -- / -- MiB")
+        self.lbl_fan = QLabel("Fan: -- %")
+        self.lbl_pcie = QLabel("PCIe: --")
 
         for lbl in [self.lbl_temp, self.lbl_mem_temp, self.lbl_headroom,
-                    self.lbl_power, self.lbl_clock, self.lbl_vram]:
+                    self.lbl_power, self.lbl_clock, self.lbl_vram,
+                    self.lbl_fan, self.lbl_pcie]:
             lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
             hw_layout.addWidget(lbl)
 
@@ -187,6 +190,31 @@ class MainWindow(QMainWindow):
         self.lbl_power.setText(f"Power: {data['power_w']} W")
         self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
         self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
+        self.lbl_fan.setText(self._format_fan(data))
+        self.lbl_pcie.setText(self._format_pcie(data))
+
+    @staticmethod
+    def _format_fan(data: dict) -> str:
+        pct, rpm = data.get('fan_speed_pct'), data.get('fan_rpm')
+        if pct is None:
+            return "Fan: N/A"
+        if rpm:
+            return f"Fan: {pct:.0f}% ({rpm} RPM)"
+        return f"Fan: {pct:.0f}%"
+
+    @staticmethod
+    def _format_pcie(data: dict) -> str:
+        gen, width = data.get('pcie_gen'), data.get('pcie_width')
+        if gen is None or width is None:
+            return "PCIe: N/A"
+
+        text = f"PCIe: Gen{gen} x{width}"
+        gen_max, width_max = data.get('pcie_gen_max'), data.get('pcie_width_max')
+        # Only worth showing when the link is downshifted — otherwise it is
+        # noise repeating what the current values already say.
+        if gen_max and width_max and (gen, width) != (gen_max, width_max):
+            text += f" (max Gen{gen_max} x{width_max})"
+        return text
 
     def start_benchmark(self):
         """Disables UI and fires up the PyTorch training thread."""
@@ -338,6 +366,17 @@ class MainWindow(QMainWindow):
         if 'temp_headroom_c' in df.columns and df['temp_headroom_c'].notna().any():
             metrics.append(
                 ("Min Thermal Headroom (°C)", f"{df['temp_headroom_c'].min():.0f}")
+            )
+
+        # Cooling and interconnect: absent on passively cooled cards.
+        if 'fan_speed_pct' in df.columns and df['fan_speed_pct'].notna().any():
+            metrics.append(("Peak Fan (%)", f"{df['fan_speed_pct'].max():.0f}"))
+        if ('pcie_gen' in df.columns and df['pcie_gen'].notna().any()
+                and df['pcie_width'].notna().any()):
+            # The link under load is the interesting one; at idle it downshifts.
+            metrics.append(
+                ("PCIe Link (peak)",
+                 f"Gen{df['pcie_gen'].max():.0f} x{df['pcie_width'].max():.0f}")
             )
 
         self.summary_table.setRowCount(len(metrics))
