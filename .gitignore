@@ -6,6 +6,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+
 # Benchmark output
 logs/
 results/
