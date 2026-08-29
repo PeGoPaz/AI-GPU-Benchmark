@@ -22,17 +22,18 @@ without a 2 GB torch install:
 ```bash
 pip install -r requirements-dev.txt
 ruff check .
+mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. CI does the same on every push and PR: ruff (pinned to 0.16.5), a parse check, and pytest on Python 3.10 and 3.13.
+`tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. CI does the same on every push and PR: ruff, mypy, a parse check, and pytest on Python 3.10 and 3.13. Rules live in `ruff.toml` and `mypy.ini`; both tools are pinned in `requirements-dev.txt`, because their default rule sets shift between releases and an unpinned upgrade could turn CI red without a line of project code changing.
 
 ## House rules
 
 - All UI is PyQt6. Anything that blocks — NVML polling, training — lives in a QThread and reports back over signals. The window must never freeze.
 - Nothing touches disk mid-run. The logger keeps telemetry in memory and writes only when the user presses Export.
 - Tests stay hardware-free: mock the GPU rather than requiring one.
-- One logical change per PR, ruff and pytest green, and update `README.md` if users would notice the difference.
+- One logical change per PR, all three checks green, and update `README.md` if users would notice the difference.
 
 ## What to work on
 
@@ -44,7 +45,7 @@ Self-contained, a file or two each. Good first PRs.
 
 - **Fan and clock curves on the plots.** Fan duty cycle already reaches the CSV and the summary table, but nothing draws it. It shares a percentage axis with GPU utilization, so it's one more line on the "Utilization & Clock" plot in both `main_window._render_plots()` and `logger._generate_plot()` — guarded by `.notna().any()`, since passively cooled cards report nothing.
 - **Theming.** Colours sit in inline `setStyleSheet()` calls scattered across `main_window.py`, and two of them are swapped at runtime to mark the Start button busy. A side effect is that disabled buttons look exactly like enabled ones. Give the widgets object names, move everything into one stylesheet with `:disabled` selectors, and the runtime swapping disappears along with the bug. A dark/light toggle gets easy afterwards.
-- **`mypy` in CI.** Types are already partly there. A job in the existing workflow would catch signal/slot mismatches early. Expect to start it non-blocking: nobody has run mypy over this code yet, so the first pass decides how much is worth fixing up front.
+- **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 33 gaps and `--strict` reports 64, nearly all of them a mechanical `-> None` on a Qt slot. Add them a module at a time, tightening the config as each one goes clean.
 
 ### 2. A configurable run
 

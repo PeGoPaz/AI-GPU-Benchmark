@@ -10,6 +10,7 @@
 
 pytest>=8.0.0
 ruff==0.16.5
+mypy==2.3.1
 
 # Imported for real by the tests, unlike the ML stack.
 PyQt6>=6.6.0

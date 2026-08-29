@@ -94,6 +94,7 @@ tests/                         — pytest suite; the ML stack and NVML are stubb
 .github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
+mypy.ini                       — type-check settings
 requirements.txt               — runtime dependencies
 requirements-dev.txt           — test and lint tooling (no ML stack)
 ```
@@ -108,7 +109,7 @@ requirements-dev.txt           — test and lint tooling (no ML stack)
 | GPU monitoring | nvidia-ml-py (PyNVML) |
 | ML training | PyTorch, Transformers, PEFT, datasets |
 | Data & plotting | pandas, matplotlib |
-| Tests & linting | pytest, ruff |
+| Tests & linting | pytest, ruff, mypy |
 
 ---
 
@@ -119,10 +120,11 @@ The test suite replaces torch, transformers, peft, datasets and NVML with stubs,
 ```bash
 pip install -r requirements-dev.txt
 ruff check .
+mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff (pinned to 0.16.5), a `compileall` parse check, and the test suite on Python 3.10 and 3.13.
+`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
 
 ---
 
