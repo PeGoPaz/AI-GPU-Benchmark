@@ -1,12 +1,21 @@
-from PyQt6.QtCore import pyqtSlot, Qt
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGroupBox, QLabel, QPushButton, QProgressBar, QTextEdit,
-    QTableWidget, QTableWidgetItem, QTabWidget, QHeaderView
-)
-
-from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.telemetry import TelemetryWorker
 from app.core.trainer import TrainerWorker
@@ -26,7 +35,7 @@ class MainWindow(QMainWindow):
 
         # --- LEFT PANEL: Hardware Stats & Controls ---
         left_panel = QVBoxLayout()
-        
+
         # 1. Hardware Dashboard
         hw_group = QGroupBox("Live Hardware Telemetry")
         hw_layout = QVBoxLayout()
@@ -41,31 +50,31 @@ class MainWindow(QMainWindow):
                     self.lbl_power, self.lbl_clock, self.lbl_vram]:
             lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
             hw_layout.addWidget(lbl)
-            
+
         hw_group.setLayout(hw_layout)
         left_panel.addWidget(hw_group)
 
         # 2. Controls
         ctrl_group = QGroupBox("Benchmark Controls")
         ctrl_layout = QVBoxLayout()
-        
+
         self.btn_start = QPushButton("Start Stress Test")
         self.btn_start.setMinimumHeight(40)
         self.btn_start.setStyleSheet("font-weight: bold; background-color: #2E8B57; color: white;")
         self.btn_start.clicked.connect(self.start_benchmark)
-        
+
         self.btn_stop = QPushButton("Stop")
         self.btn_stop.setMinimumHeight(35)
         self.btn_stop.setStyleSheet("background-color: #8B0000; color: white; font-weight: bold;")
         self.btn_stop.clicked.connect(self.stop_benchmark)
         self.btn_stop.setEnabled(False)
-        
+
         self.btn_export = QPushButton("Export Results")
         self.btn_export.setMinimumHeight(35)
         self.btn_export.setStyleSheet("background-color: #4682B4; color: white;")
         self.btn_export.clicked.connect(self.export_results)
         self.btn_export.setEnabled(False)
-        
+
         ctrl_layout.addWidget(self.btn_start)
         ctrl_layout.addWidget(self.btn_stop)
         ctrl_layout.addWidget(self.btn_export)
@@ -75,7 +84,7 @@ class MainWindow(QMainWindow):
 
         # --- RIGHT PANEL: Console, Progress, Plots, Summary ---
         right_panel = QVBoxLayout()
-        
+
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setMaximumHeight(180)
@@ -89,17 +98,17 @@ class MainWindow(QMainWindow):
         self.plot_tabs = QTabWidget()
         self.plot_tabs.setMinimumHeight(280)
         self.plot_tabs.setVisible(False)
-        
+
         # Tab 1: Thermal & Power
         thermal_figure = Figure(figsize=(8, 3))
         self.thermal_canvas = FigureCanvas(thermal_figure)
         self.plot_tabs.addTab(self.thermal_canvas, "Thermal & Power")
-        
+
         # Tab 2: Utilization & Clock
         util_figure = Figure(figsize=(8, 3))
         self.util_canvas = FigureCanvas(util_figure)
         self.plot_tabs.addTab(self.util_canvas, "Utilization & Clock")
-        
+
         # Summary stats table
         self.summary_group = QGroupBox("Benchmark Summary")
         summary_layout = QVBoxLayout()
@@ -129,7 +138,7 @@ class MainWindow(QMainWindow):
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
         self.telemetry.start()
-        
+
         self.trainer = None
 
     def log_to_console(self, text: str):
@@ -253,7 +262,7 @@ class MainWindow(QMainWindow):
 
         self.plot_tabs.setVisible(True)
         self.plot_tabs.setCurrentIndex(0)
-        
+
         # --- Summary Stats Table ---
         self._render_summary(df, summary)
         self.log_to_console("Summary and plots rendered.")
@@ -266,7 +275,7 @@ class MainWindow(QMainWindow):
         peak_power = df['power_w'].max()
         avg_vram = df['vram_used_mb'].mean()
         peak_vram = df['vram_used_mb'].max()
-        
+
         steps_per_sec = summary['steps_per_sec']
         efficiency = steps_per_sec / avg_power if avg_power > 0 else 0
 
@@ -294,7 +303,7 @@ class MainWindow(QMainWindow):
             metrics.append(
                 ("Min Thermal Headroom (°C)", f"{df['temp_headroom_c'].min():.0f}")
             )
-        
+
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):
             item_m = QTableWidgetItem(metric)
@@ -303,7 +312,7 @@ class MainWindow(QMainWindow):
             item_v.setFlags(item_v.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.summary_table.setItem(row, 0, item_m)
             self.summary_table.setItem(row, 1, item_v)
-        
+
         self.summary_group.setVisible(True)
 
     def export_results(self):

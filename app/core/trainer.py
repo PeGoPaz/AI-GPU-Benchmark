@@ -1,11 +1,17 @@
 import gc
 import time
-import torch
-from PyQt6.QtCore import QThread, pyqtSignal
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
-from peft import LoraConfig, get_peft_model
+import torch
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
+from PyQt6.QtCore import QThread, pyqtSignal
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+)
 
 
 class PyQtProgressCallback(TrainerCallback):
@@ -45,37 +51,37 @@ class TrainerWorker(QThread):
         try:
             self.max_steps_ready.emit(self.steps)
             self.status_updated.emit("Loading Tokenizer & Dataset (may take a moment on first run)...")
-            
+
             model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-            
+
             # 1. Load Dataset (A small dataset of English quotes)
             data = load_dataset("Abirate/english_quotes")
             tokenizer = AutoTokenizer.from_pretrained(model_id)
             tokenizer.pad_token = tokenizer.eos_token
-            
+
             def tokenize(batch):
                 return tokenizer(batch["quote"], padding="max_length", truncation=True, max_length=128)
-            
+
             tokenized_data = data["train"].map(tokenize, batched=True)
 
             self.status_updated.emit("Loading Base Model into VRAM...")
-            
-            # 2. Load Model 
+
+            # 2. Load Model
             model = AutoModelForCausalLM.from_pretrained(
-                model_id, 
-                device_map="cuda:0", 
+                model_id,
+                device_map="cuda:0",
                 torch_dtype=torch.bfloat16 # Uses 16-bit precision for modern RTX cards
             )
-            
+
             self.status_updated.emit("Applying LoRA Adapters...")
-            
+
             # 3. Apply LoRA (Low-Rank Adaptation)
             config = LoraConfig(
-                r=8, 
-                lora_alpha=16, 
-                target_modules=["q_proj", "v_proj"], 
+                r=8,
+                lora_alpha=16,
+                target_modules=["q_proj", "v_proj"],
                 lora_dropout=0.05,
-                bias="none", 
+                bias="none",
                 task_type="CAUSAL_LM"
             )
             model = get_peft_model(model, config)
@@ -97,16 +103,16 @@ class TrainerWorker(QThread):
                 model=model,
                 train_dataset=tokenized_data,
                 args=training_args,
-                data_collator=lambda data: {'input_ids': torch.stack([torch.tensor(d['input_ids']) for d in data]), 
-                                            'attention_mask': torch.stack([torch.tensor(d['attention_mask']) for d in data]), 
+                data_collator=lambda data: {'input_ids': torch.stack([torch.tensor(d['input_ids']) for d in data]),
+                                            'attention_mask': torch.stack([torch.tensor(d['attention_mask']) for d in data]),
                                             'labels': torch.stack([torch.tensor(d['input_ids']) for d in data])},
                 callbacks=[PyQtProgressCallback(self)]
             )
 
             self.status_updated.emit(f"Starting LoRA Fine-Tuning for {self.steps} steps...")
-            
+
             start_time = time.time()
-            
+
             # 5. Execute Training!
             trainer.train()
 
@@ -136,7 +142,11 @@ class TrainerWorker(QThread):
 
             # --- Instant VRAM Offload ---
             self.status_updated.emit("Offloading model from VRAM...")
-            del trainer, model, tokenizer, tokenized_data, data, config, training_args
+            # `tokenizer` is intentionally left bound: the tokenize() closure
+            # defined above still references it, and deleting it here would
+            # leave that closure with a dead cell (NameError if called again).
+            # It holds no VRAM anyway — only the model and trainer do.
+            del trainer, model, tokenized_data, data, config, training_args
             gc.collect()
             torch.cuda.empty_cache()
             self.status_updated.emit("VRAM freed.")

@@ -1,7 +1,7 @@
 import time
+
 import pynvml
 from PyQt6.QtCore import QThread, pyqtSignal
-
 
 # NVML exposes exactly one temperature sensor via nvmlDeviceGetTemperature
 # (NVML_TEMPERATURE_COUNT == 1, sensor 0 == GPU core). The junction/hotspot
