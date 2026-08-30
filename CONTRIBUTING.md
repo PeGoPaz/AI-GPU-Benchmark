@@ -51,7 +51,6 @@ Self-contained, a file or two each. Good first PRs.
 
 The gateway to most of the rest: model, step count, batch size and precision are all hardcoded today.
 
-- **Settings panel.** Dropdowns and spin boxes for model (TinyLlama, Phi, Mistral…), step count and batch size, feeding `TrainerWorker` instead of the constants in `start_benchmark()`.
 - **Warm-up steps.** The first few steps carry model loading and CUDA compilation overhead and skew the throughput average. Run ~10 warm-up steps (configurable) before starting the timer.
 - **Precision toggle.** BF16 / FP16 / FP32, later INT8/INT4 via `bitsandbytes` — one more control in the same panel, and a genuinely interesting axis to measure.
 

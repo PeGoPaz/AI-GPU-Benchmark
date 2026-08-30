@@ -23,8 +23,9 @@ class FakeTrainer(QObject):
     error_occurred = pyqtSignal(str)
     max_steps_ready = pyqtSignal(int)
 
-    def __init__(self, steps=150, batch_size=4, parent=None):
+    def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
+        self.kwargs = kwargs          # what MainWindow asked for
         self._started = False
 
     def start(self):
@@ -287,3 +288,44 @@ def test_percentages_and_clock_use_separate_axes(window, telemetry_sample):
     percent_axes, clock_axes = window.util_canvas.figure.axes
     assert percent_axes.get_ylim() == (0, 105)
     assert [line.get_label() for line in clock_axes.get_lines()] == ["SM Clock (MHz)"]
+
+
+def test_workload_settings_reach_the_trainer(window, monkeypatch):
+    """The run used to be hardcoded to 150 steps of TinyLlama at batch 4."""
+    import app.ui.main_window as mw
+    monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
+
+    window.spin_steps.setValue(300)
+    window.spin_batch.setValue(8)
+    window.cmb_model.setCurrentIndex(1)
+    chosen = window.cmb_model.currentData()
+    window.start_benchmark()
+
+    assert window.trainer.kwargs["steps"] == 300
+    assert window.trainer.kwargs["batch_size"] == 8
+    assert window.trainer.kwargs["model"] is chosen
+
+
+def test_settings_are_locked_during_a_run(started_run):
+    """They describe the run in the summary, so they must not move under it."""
+    assert not started_run.workload_group.isEnabled()
+
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert started_run.workload_group.isEnabled()
+
+
+def test_summary_records_what_was_benchmarked(window, telemetry_sample):
+    window.logger.start()
+    for i in range(5):
+        window.logger.log(telemetry_sample(i))
+
+    window.on_benchmark_finished({
+        "model": "Qwen2.5 1.5B", "batch_size": 8,
+        "total_steps": 300, "requested_steps": 300, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 4.29,
+    })
+
+    rows = _summary_rows(window)
+    assert rows["Model"] == "Qwen2.5 1.5B"
+    assert rows["Batch Size"] == "8"

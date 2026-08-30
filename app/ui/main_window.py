@@ -2,6 +2,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -9,6 +11,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -18,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.telemetry import TelemetryWorker
-from app.core.trainer import TrainerWorker
+from app.core.trainer import MODELS, TrainerWorker
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
 
@@ -58,7 +61,30 @@ class MainWindow(QMainWindow):
         hw_group.setLayout(hw_layout)
         left_panel.addWidget(hw_group)
 
-        # 2. Controls
+        # 2. Workload settings
+        self.workload_group = QGroupBox("Workload")
+        workload_layout = QFormLayout()
+
+        self.cmb_model = QComboBox()
+        for spec in MODELS:
+            self.cmb_model.addItem(spec.label, spec)
+
+        self.spin_steps = QSpinBox()
+        self.spin_steps.setRange(10, 5000)
+        self.spin_steps.setSingleStep(10)
+        self.spin_steps.setValue(150)
+
+        self.spin_batch = QSpinBox()
+        self.spin_batch.setRange(1, 64)
+        self.spin_batch.setValue(4)
+
+        workload_layout.addRow("Model:", self.cmb_model)
+        workload_layout.addRow("Steps:", self.spin_steps)
+        workload_layout.addRow("Batch size:", self.spin_batch)
+        self.workload_group.setLayout(workload_layout)
+        left_panel.addWidget(self.workload_group)
+
+        # 3. Controls
         ctrl_group = QGroupBox("Benchmark Controls")
         ctrl_layout = QVBoxLayout()
 
@@ -231,7 +257,15 @@ class MainWindow(QMainWindow):
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         self.logger.start()
 
-        self.trainer = TrainerWorker(steps=150, batch_size=4)
+        # Locked for the duration: the summary reports these values, so they
+        # must describe the run that actually happened.
+        self.workload_group.setEnabled(False)
+
+        self.trainer = TrainerWorker(
+            steps=self.spin_steps.value(),
+            batch_size=self.spin_batch.value(),
+            model=self.cmb_model.currentData(),
+        )
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
         self.trainer.max_steps_ready.connect(lambda steps: self.progress_bar.setRange(0, steps))
@@ -281,6 +315,7 @@ class MainWindow(QMainWindow):
 
     def _set_idle_controls(self):
         """Returns the control panel to its ready-for-a-new-run state."""
+        self.workload_group.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_start.setEnabled(True)
 
@@ -368,6 +403,8 @@ class MainWindow(QMainWindow):
             steps_label += f" of {summary['requested_steps']} (stopped early)"
 
         metrics = [
+            ("Model", summary.get("model", "—")),
+            ("Batch Size", str(summary.get("batch_size", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
             ("Steps/sec", f"{steps_per_sec:.2f}"),

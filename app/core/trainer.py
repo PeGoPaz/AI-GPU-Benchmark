@@ -1,5 +1,6 @@
 import gc
 import time
+from dataclasses import dataclass
 
 import torch
 from datasets import load_dataset
@@ -12,6 +13,35 @@ from transformers import (
     TrainerCallback,
     TrainingArguments,
 )
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """A selectable workload target.
+
+    lora_targets is carried per model rather than hardcoded: attention
+    projections are not named consistently across architectures, and a wrong
+    name makes get_peft_model attach nothing while training happily reports
+    success.
+    """
+
+    label: str
+    model_id: str
+    lora_targets: tuple[str, ...]
+
+
+# Ungated on the Hub on purpose — a gated model would fail the download with
+# an auth error rather than a message anyone can act on.
+MODELS = (
+    ModelSpec("TinyLlama 1.1B", "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+              ("q_proj", "v_proj")),
+    ModelSpec("Qwen2.5 1.5B", "Qwen/Qwen2.5-1.5B-Instruct",
+              ("q_proj", "v_proj")),
+    ModelSpec("Phi-2 2.7B", "microsoft/phi-2",
+              ("q_proj", "v_proj")),
+)
+
+DEFAULT_MODEL = MODELS[0]
 
 
 class PyQtProgressCallback(TrainerCallback):
@@ -40,10 +70,12 @@ class TrainerWorker(QThread):
     error_occurred = pyqtSignal(str)
     max_steps_ready = pyqtSignal(int)
 
-    def __init__(self, steps: int = 150, batch_size: int = 4, parent=None):
+    def __init__(self, steps: int = 150, batch_size: int = 4,
+                 model: ModelSpec = DEFAULT_MODEL, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
+        self.model_spec = model
         self.completed_steps = 0
         self._is_running = True
 
@@ -52,7 +84,7 @@ class TrainerWorker(QThread):
             self.max_steps_ready.emit(self.steps)
             self.status_updated.emit("Loading Tokenizer & Dataset (may take a moment on first run)...")
 
-            model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            model_id = self.model_spec.model_id
 
             # 1. Load Dataset (A small dataset of English quotes)
             data = load_dataset("Abirate/english_quotes")
@@ -79,7 +111,7 @@ class TrainerWorker(QThread):
             config = LoraConfig(
                 r=8,
                 lora_alpha=16,
-                target_modules=["q_proj", "v_proj"],
+                target_modules=list(self.model_spec.lora_targets),
                 lora_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM"
@@ -109,7 +141,10 @@ class TrainerWorker(QThread):
                 callbacks=[PyQtProgressCallback(self)]
             )
 
-            self.status_updated.emit(f"Starting LoRA Fine-Tuning for {self.steps} steps...")
+            self.status_updated.emit(
+                f"Starting LoRA Fine-Tuning of {self.model_spec.label} "
+                f"for {self.steps} steps..."
+            )
 
             start_time = time.time()
 
@@ -125,6 +160,10 @@ class TrainerWorker(QThread):
             was_aborted = steps_done < self.steps
 
             summary = {
+                # Recorded so the summary says what was benchmarked, not just
+                # how fast it went — the numbers mean nothing without it.
+                "model": self.model_spec.label,
+                "batch_size": self.batch_size,
                 "total_steps": steps_done,
                 "requested_steps": self.steps,
                 "aborted": was_aborted,
