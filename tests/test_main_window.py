@@ -297,12 +297,14 @@ def test_workload_settings_reach_the_trainer(window, monkeypatch):
 
     window.spin_steps.setValue(300)
     window.spin_batch.setValue(8)
+    window.spin_warmup.setValue(25)
     window.cmb_model.setCurrentIndex(1)
     chosen = window.cmb_model.currentData()
     window.start_benchmark()
 
     assert window.trainer.kwargs["steps"] == 300
     assert window.trainer.kwargs["batch_size"] == 8
+    assert window.trainer.kwargs["warmup_steps"] == 25
     assert window.trainer.kwargs["model"] is chosen
 
 

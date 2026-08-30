@@ -78,9 +78,18 @@ class MainWindow(QMainWindow):
         self.spin_batch.setRange(1, 64)
         self.spin_batch.setValue(4)
 
+        self.spin_warmup = QSpinBox()
+        self.spin_warmup.setRange(0, 100)
+        self.spin_warmup.setValue(10)
+        self.spin_warmup.setToolTip(
+            "Steps run before the timer starts, to get model loading and CUDA "
+            "kernel compilation out of the measured window."
+        )
+
         workload_layout.addRow("Model:", self.cmb_model)
         workload_layout.addRow("Steps:", self.spin_steps)
         workload_layout.addRow("Batch size:", self.spin_batch)
+        workload_layout.addRow("Warm-up steps:", self.spin_warmup)
         self.workload_group.setLayout(workload_layout)
         left_panel.addWidget(self.workload_group)
 
@@ -265,6 +274,7 @@ class MainWindow(QMainWindow):
             steps=self.spin_steps.value(),
             batch_size=self.spin_batch.value(),
             model=self.cmb_model.currentData(),
+            warmup_steps=self.spin_warmup.value(),
         )
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
@@ -405,6 +415,7 @@ class MainWindow(QMainWindow):
         metrics = [
             ("Model", summary.get("model", "—")),
             ("Batch Size", str(summary.get("batch_size", "—"))),
+            ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
             ("Steps/sec", f"{steps_per_sec:.2f}"),

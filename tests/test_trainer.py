@@ -11,14 +11,18 @@ from app.core.trainer import PyQtProgressCallback, TrainerWorker
 
 class _FakeWorker:
     """Minimal stand-in exposing what the callback touches."""
-    def __init__(self):
+    def __init__(self, warmup_steps=0, steps=150):
         self._is_running = True
         self.completed_steps = 0
+        self.warmup_steps = warmup_steps
+        self.steps = steps
+        self.measure_start = None
         self.progress_updated = types.SimpleNamespace(emit=lambda *_: None)
+        self.status_updated = types.SimpleNamespace(emit=lambda *_: None)
 
 
-def _drive_callback(steps, stop_at=None):
-    worker = _FakeWorker()
+def _drive_callback(steps, stop_at=None, warmup_steps=0):
+    worker = _FakeWorker(warmup_steps=warmup_steps)
     cb = PyQtProgressCallback(worker)
     state = types.SimpleNamespace(global_step=0, log_history=[{"loss": 0.5}])
     control = types.SimpleNamespace(should_training_stop=False)
@@ -33,13 +37,20 @@ def _drive_callback(steps, stop_at=None):
     return worker, control
 
 
-def run_worker(steps=150, stop_after=None, elapsed=20.0, **worker_kwargs):
+def run_worker(steps=150, stop_after=None, elapsed=20.0, warmup_elapsed=5.0,
+               **worker_kwargs):
     """Executes the real TrainerWorker.run() against a fake HF Trainer.
+
+    `elapsed` is the timed window, not the wall clock: with a warm-up the run
+    also burns `warmup_elapsed` before timing opens. Warm-up defaults to off
+    here so the older tests keep meaning exactly what they did; the warm-up
+    tests ask for it explicitly.
 
     Returns what the worker emitted, plus the patched HF entry points under
     "mocks" so tests can assert what was actually asked of them.
     """
     captured = {}
+    worker_kwargs.setdefault("warmup_steps", 0)
     worker = TrainerWorker(steps=steps, **worker_kwargs)
     for signal in ("status_updated", "max_steps_ready", "progress_updated"):
         setattr(worker, signal, types.SimpleNamespace(emit=lambda *_: None))
@@ -55,7 +66,8 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, **worker_kwargs):
         def train(self):
             state = types.SimpleNamespace(global_step=0, log_history=[{"loss": 0.5}])
             control = types.SimpleNamespace(should_training_stop=False)
-            for step in range(1, steps + 1):
+            # Warm-up steps are really executed, so the fake runs them too.
+            for step in range(1, worker.warmup_steps + steps + 1):
                 if stop_after and step >= stop_after:
                     worker._is_running = False      # user pressed Stop
                 state.global_step = step
@@ -64,14 +76,24 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, **worker_kwargs):
                 if control.should_training_stop:
                     break
 
-    clock = iter([0.0, elapsed])
+    # Ticks in the order run() reads them: start, warm-up boundary, finish.
+    ticks = iter([0.0, warmup_elapsed, warmup_elapsed + elapsed]
+                 if worker.warmup_steps else [0.0, elapsed])
+    last = warmup_elapsed + elapsed
+
+    def clock_now():
+        nonlocal last
+        try:
+            return next(ticks)
+        except StopIteration:
+            return last
     mocks = {name: mock.MagicMock() for name in
              ("TrainingArguments", "AutoTokenizer", "AutoModelForCausalLM",
               "load_dataset", "get_peft_model", "LoraConfig")}
     with mock.patch.multiple(
         trainer_module,
         Trainer=FakeTrainer,
-        time=types.SimpleNamespace(time=lambda: next(clock)),
+        time=types.SimpleNamespace(time=clock_now),
         **mocks,
     ):
         worker.run()
@@ -206,3 +228,49 @@ def test_every_model_declares_lora_targets():
     for spec in trainer_module.MODELS:
         assert spec.lora_targets, spec.label
         assert "/" in spec.model_id, spec.label
+
+
+# --- warm-up ------------------------------------------------------------------
+
+def test_warmup_steps_are_excluded_from_throughput():
+    """The first steps carry lazy weight loading and CUDA kernel compilation.
+    Counting them reports a rate the card never actually sustained."""
+    summary = run_worker(steps=100, warmup_steps=10,
+                         warmup_elapsed=30.0, elapsed=20.0)["summary"]
+
+    assert summary["warmup_steps"] == 10
+    assert summary["total_steps"] == 100        # measured, warm-up excluded
+    assert summary["elapsed_time_sec"] == 20.0  # the timed window only
+    assert summary["steps_per_sec"] == 5.0      # 100/20, not 110/50 == 2.2
+    assert summary["aborted"] is False
+
+
+def test_warmup_is_added_to_the_step_budget():
+    """Warm-up steps are executed, not skipped, so HF must be asked for them."""
+    result = run_worker(steps=100, warmup_steps=10)
+
+    assert result["mocks"]["TrainingArguments"].call_args.kwargs["max_steps"] == 110
+
+
+def test_stopping_during_warmup_reports_no_throughput():
+    """The timed window never opened, so there is no rate to report — and
+    certainly not one derived from warm-up steps."""
+    summary = run_worker(steps=100, warmup_steps=10, stop_after=4)["summary"]
+
+    assert summary["total_steps"] == 0
+    assert summary["elapsed_time_sec"] == 0.0
+    assert summary["steps_per_sec"] == 0.0
+    assert summary["aborted"] is True
+
+
+def test_callback_opens_the_timed_window_at_the_boundary():
+    worker, _ = _drive_callback(20, warmup_steps=10)
+
+    assert worker.measure_start is not None
+
+
+def test_no_warmup_times_the_whole_run():
+    summary = run_worker(steps=150, warmup_steps=0, elapsed=20.0)["summary"]
+
+    assert summary["warmup_steps"] == 0
+    assert summary["steps_per_sec"] == 7.5
