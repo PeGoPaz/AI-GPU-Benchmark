@@ -44,6 +44,31 @@ MODELS = (
 DEFAULT_MODEL = MODELS[0]
 
 
+@dataclass(frozen=True)
+class PrecisionSpec:
+    """A numeric format the run can be executed in.
+
+    dtype_name is resolved against torch at call time rather than stored as a
+    dtype object, so the registry stays importable without torch present.
+    """
+
+    label: str
+    dtype_name: str
+    bf16: bool
+    fp16: bool
+
+
+# BF16 needs Ampere or newer; FP16 works further back but has a much narrower
+# exponent range; FP32 runs anywhere and roughly doubles both VRAM and time.
+PRECISIONS = (
+    PrecisionSpec("BF16", "bfloat16", bf16=True, fp16=False),
+    PrecisionSpec("FP16", "float16", bf16=False, fp16=True),
+    PrecisionSpec("FP32", "float32", bf16=False, fp16=False),
+)
+
+DEFAULT_PRECISION = PRECISIONS[0]
+
+
 class PyQtProgressCallback(TrainerCallback):
     """Custom Hugging Face callback to send progress back to the PyQt UI."""
     def __init__(self, worker):
@@ -83,11 +108,12 @@ class TrainerWorker(QThread):
 
     def __init__(self, steps: int = 150, batch_size: int = 4,
                  model: ModelSpec = DEFAULT_MODEL, warmup_steps: int = 10,
-                 parent=None):
+                 precision: PrecisionSpec = DEFAULT_PRECISION, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
         self.model_spec = model
+        self.precision = precision
         self.warmup_steps = warmup_steps
         self.completed_steps = 0
         # Stays None until the timed window opens, which is how a run stopped
@@ -120,7 +146,7 @@ class TrainerWorker(QThread):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 device_map="cuda:0",
-                torch_dtype=torch.bfloat16 # Uses 16-bit precision for modern RTX cards
+                torch_dtype=getattr(torch, self.precision.dtype_name),
             )
 
             self.status_updated.emit("Applying LoRA Adapters...")
@@ -144,8 +170,8 @@ class TrainerWorker(QThread):
                 max_steps=self.warmup_steps + self.steps,
                 logging_steps=1,
                 learning_rate=2e-4,
-                fp16=False,
-                bf16=True, # RTX 40-series optimizes bfloat16 incredibly well
+                fp16=self.precision.fp16,
+                bf16=self.precision.bf16,
                 report_to="none" # Disables wandb/tensorboard logging
             )
 
@@ -161,7 +187,7 @@ class TrainerWorker(QThread):
 
             self.status_updated.emit(
                 f"Starting LoRA Fine-Tuning of {self.model_spec.label} "
-                f"for {self.steps} steps..."
+                f"in {self.precision.label} for {self.steps} steps..."
             )
 
             start_time = time.time()
@@ -188,6 +214,7 @@ class TrainerWorker(QThread):
                 # how fast it went — the numbers mean nothing without it.
                 "model": self.model_spec.label,
                 "batch_size": self.batch_size,
+                "precision": self.precision.label,
                 "warmup_steps": self.warmup_steps,
                 "total_steps": steps_done,
                 "requested_steps": self.steps,

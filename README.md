@@ -47,7 +47,7 @@ The GUI window opens with:
 
 - A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, power, clock speed, VRAM, fan speed, PCIe link) that begins polling as soon as the app starts
 - Automatic GPU name detection shown in the window title
-- A **Workload** panel to pick the model (TinyLlama 1.1B, Qwen2.5 1.5B, Phi-2 2.7B), step count, batch size and warm-up steps, locked for the duration of a run
+- A **Workload** panel to pick the model (TinyLlama 1.1B, Qwen2.5 1.5B, Phi-2 2.7B), step count, batch size, precision and warm-up steps, locked for the duration of a run
 - A "Start Stress Test" button — launches the LoRA fine-tuning run
 - An execution log and progress bar tracking the training loop
 - A "Stop" button that ends the run at the next step boundary without freezing the window
@@ -58,7 +58,7 @@ The GUI window opens with:
 
 ## How It Works
 
-The benchmark runs a LoRA fine-tune (bfloat16, rank 8) on a small English quotes dataset using Hugging Face Transformers and PEFT. Model, step count and per-device batch size come from the Workload panel — 150 steps of TinyLlama 1.1B at batch 4 by default — and 4 gradient accumulation steps sit on top, so the effective batch is four times the one you pick. Each model carries its own LoRA target modules, since attention projections are not named alike across architectures. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock, fan speed, PCIe link) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus throughput and efficiency in steps/sec/W. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
+The benchmark runs a LoRA fine-tune (rank 8) on a small English quotes dataset using Hugging Face Transformers and PEFT. Model, step count and per-device batch size come from the Workload panel — 150 steps of TinyLlama 1.1B at batch 4 by default — and 4 gradient accumulation steps sit on top, so the effective batch is four times the one you pick. Each model carries its own LoRA target modules, since attention projections are not named alike across architectures. Precision is selectable between BF16 (the default, Ampere and newer), FP16 and FP32 — it drives both the weight dtype and the Trainer's mixed-precision flags, and is an axis worth benchmarking in its own right. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock, fan speed, PCIe link) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus throughput and efficiency in steps/sec/W. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run.
 
 Throughput is computed from the steps that actually completed, so stopping a run early reports its real steps/sec instead of overstating it.
 

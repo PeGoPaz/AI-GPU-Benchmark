@@ -51,7 +51,7 @@ Self-contained, a file or two each. Good first PRs.
 
 The gateway to most of the rest: model, step count, batch size and precision are all hardcoded today.
 
-- **Precision toggle.** BF16 / FP16 / FP32, later INT8/INT4 via `bitsandbytes` — one more control in the same panel, and a genuinely interesting axis to measure.
+- **Quantized precision.** The panel offers BF16, FP16 and FP32; INT8 and INT4 via `bitsandbytes` would extend `PRECISIONS` in `trainer.py` with a quantization config rather than a plain dtype, which is why they were left out of the first pass.
 
 ### 3. Results worth keeping
 

@@ -299,6 +299,7 @@ def test_workload_settings_reach_the_trainer(window, monkeypatch):
     window.spin_batch.setValue(8)
     window.spin_warmup.setValue(25)
     window.cmb_model.setCurrentIndex(1)
+    window.cmb_precision.setCurrentIndex(1)          # FP16
     chosen = window.cmb_model.currentData()
     window.start_benchmark()
 
@@ -306,6 +307,7 @@ def test_workload_settings_reach_the_trainer(window, monkeypatch):
     assert window.trainer.kwargs["batch_size"] == 8
     assert window.trainer.kwargs["warmup_steps"] == 25
     assert window.trainer.kwargs["model"] is chosen
+    assert window.trainer.kwargs["precision"].label == "FP16"
 
 
 def test_settings_are_locked_during_a_run(started_run):
@@ -323,7 +325,7 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
         window.logger.log(telemetry_sample(i))
 
     window.on_benchmark_finished({
-        "model": "Qwen2.5 1.5B", "batch_size": 8,
+        "model": "Qwen2.5 1.5B", "batch_size": 8, "precision": "FP16",
         "total_steps": 300, "requested_steps": 300, "aborted": False,
         "elapsed_time_sec": 70.0, "steps_per_sec": 4.29,
     })
@@ -331,3 +333,4 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
     rows = _summary_rows(window)
     assert rows["Model"] == "Qwen2.5 1.5B"
     assert rows["Batch Size"] == "8"
+    assert rows["Precision"] == "FP16"

@@ -274,3 +274,34 @@ def test_no_warmup_times_the_whole_run():
 
     assert summary["warmup_steps"] == 0
     assert summary["steps_per_sec"] == 7.5
+
+
+# --- precision ----------------------------------------------------------------
+
+def test_each_precision_maps_to_matching_dtype_and_flags():
+    """fp16 and bf16 are separate TrainingArguments flags; setting both, or
+    neither when a half format was asked for, silently changes the workload."""
+    for spec in trainer_module.PRECISIONS:
+        result = run_worker(precision=spec)
+        args = result["mocks"]["TrainingArguments"].call_args.kwargs
+        model_kwargs = result["mocks"]["AutoModelForCausalLM"] \
+            .from_pretrained.call_args.kwargs
+
+        assert (args["bf16"], args["fp16"]) == (spec.bf16, spec.fp16), spec.label
+        assert not (args["bf16"] and args["fp16"]), spec.label
+        assert model_kwargs["torch_dtype"] is getattr(
+            trainer_module.torch, spec.dtype_name), spec.label
+
+
+def test_summary_records_the_precision():
+    summary = run_worker(precision=trainer_module.PRECISIONS[2])["summary"]
+
+    assert summary["precision"] == "FP32"
+
+
+def test_fp32_asks_for_neither_half_flag():
+    args = run_worker(precision=trainer_module.PRECISIONS[2])[
+        "mocks"]["TrainingArguments"].call_args.kwargs
+
+    assert args["bf16"] is False
+    assert args["fp16"] is False

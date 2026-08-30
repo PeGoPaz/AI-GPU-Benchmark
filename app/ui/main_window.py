@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.telemetry import TelemetryWorker
-from app.core.trainer import MODELS, TrainerWorker
+from app.core.trainer import MODELS, PRECISIONS, TrainerWorker
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
 
@@ -78,6 +78,14 @@ class MainWindow(QMainWindow):
         self.spin_batch.setRange(1, 64)
         self.spin_batch.setValue(4)
 
+        self.cmb_precision = QComboBox()
+        for spec in PRECISIONS:
+            self.cmb_precision.addItem(spec.label, spec)
+        self.cmb_precision.setToolTip(
+            "BF16 needs Ampere or newer. FP32 runs anywhere but roughly "
+            "doubles VRAM and time."
+        )
+
         self.spin_warmup = QSpinBox()
         self.spin_warmup.setRange(0, 100)
         self.spin_warmup.setValue(10)
@@ -89,6 +97,7 @@ class MainWindow(QMainWindow):
         workload_layout.addRow("Model:", self.cmb_model)
         workload_layout.addRow("Steps:", self.spin_steps)
         workload_layout.addRow("Batch size:", self.spin_batch)
+        workload_layout.addRow("Precision:", self.cmb_precision)
         workload_layout.addRow("Warm-up steps:", self.spin_warmup)
         self.workload_group.setLayout(workload_layout)
         left_panel.addWidget(self.workload_group)
@@ -275,6 +284,7 @@ class MainWindow(QMainWindow):
             batch_size=self.spin_batch.value(),
             model=self.cmb_model.currentData(),
             warmup_steps=self.spin_warmup.value(),
+            precision=self.cmb_precision.currentData(),
         )
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
@@ -415,6 +425,7 @@ class MainWindow(QMainWindow):
         metrics = [
             ("Model", summary.get("model", "—")),
             ("Batch Size", str(summary.get("batch_size", "—"))),
+            ("Precision", summary.get("precision", "—")),
             ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
