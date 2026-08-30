@@ -334,3 +334,11 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
     assert rows["Model"] == "Qwen2.5 1.5B"
     assert rows["Batch Size"] == "8"
     assert rows["Precision"] == "FP16"
+
+
+def test_tab_labels_keep_their_ampersand(window):
+    """A single & is a mnemonic marker to Qt and gets swallowed, which showed
+    the tabs as "Thermal _Power" and "Utilization, Clock  Fan"."""
+    labels = [window.plot_tabs.tabText(i) for i in range(window.plot_tabs.count())]
+
+    assert labels == ["Thermal && Power", "Utilization, Clock && Fan"]

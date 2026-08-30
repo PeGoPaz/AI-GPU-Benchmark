@@ -150,12 +150,12 @@ class MainWindow(QMainWindow):
         # Tab 1: Thermal & Power
         thermal_figure = Figure(figsize=(8, 3))
         self.thermal_canvas = FigureCanvas(thermal_figure)
-        self.plot_tabs.addTab(self.thermal_canvas, "Thermal & Power")
+        self.plot_tabs.addTab(self.thermal_canvas, "Thermal && Power")
 
         # Tab 2: Utilization & Clock
         util_figure = Figure(figsize=(8, 3))
         self.util_canvas = FigureCanvas(util_figure)
-        self.plot_tabs.addTab(self.util_canvas, "Utilization, Clock & Fan")
+        self.plot_tabs.addTab(self.util_canvas, "Utilization, Clock && Fan")
 
         # Summary stats table
         self.summary_group = QGroupBox("Benchmark Summary")
