@@ -37,7 +37,7 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 
 ## What to work on
 
-Four blocks, roughly ordered — later ones build on earlier ones, and each is a sensible chunk of work by itself. Open an issue before starting anything large so we don't duplicate effort.
+Three blocks, roughly ordered — later ones build on earlier ones, and each is a sensible chunk of work by itself. Open an issue before starting anything large so we don't duplicate effort.
 
 ### 1. Warm-ups
 
@@ -46,21 +46,15 @@ Self-contained, a file or two each. Good first PRs.
 - **Dark/light toggle.** `app/ui/style.py` keeps the palette as constants and builds `STYLESHEET` from them, so a second theme is a second palette plus a menu action that re-applies the sheet. The part worth thinking about is where the choice is remembered between runs; `QSettings` is the obvious answer.
 - **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 33 gaps and `--strict` reports 64, nearly all of them a mechanical `-> None` on a Qt slot. Add them a module at a time, tightening the config as each one goes clean.
 
-### 2. A configurable run
-
-The gateway to most of the rest: model, step count, batch size and precision are all hardcoded today.
-
-- **Quantized precision.** The panel offers BF16, FP16 and FP32; INT8 and INT4 via `bitsandbytes` would extend `PRECISIONS` in `trainer.py` with a quantization config rather than a plain dtype, which is why they were left out of the first pass.
-
-### 3. Results worth keeping
+### 2. Results worth keeping
 
 - **Run report.** One Markdown or JSON file per run: GPU, settings, final stats, paths to the CSV and PNG. Makes results shareable, and gives the next two features a stable format to read.
-- **Multi-run mode.** Three to five runs back to back, averaged, outliers dropped — the only way the numbers really mean anything. Needs the parameterised run from block 2.
+- **Multi-run mode.** Three to five runs back to back, averaged, outliers dropped — the only way the numbers really mean anything. The run is parameterised already, so this is mostly orchestration.
 - **Historical overlay.** Load a previous run's CSV and draw its curves behind the current ones, to compare against your own baseline or someone else's card.
 
-### 4. Inference benchmark
+### 3. Inference benchmark
 
-The big one. Training is half the picture; plenty of people care more about tokens/sec and time-to-first-token. This is a second benchmark mode with its own worker, metrics and summary — build it on the settings panel and report format from blocks 2 and 3.
+The big one. Training is half the picture; plenty of people care more about tokens/sec and time-to-first-token. This is a second benchmark mode with its own worker, metrics and summary — build it on the settings panel and the report format from block 2.
 
 ## Questions
 

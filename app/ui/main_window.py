@@ -94,7 +94,8 @@ class MainWindow(QMainWindow):
             self.cmb_precision.addItem(spec.label, spec)
         self.cmb_precision.setToolTip(
             "BF16 needs Ampere or newer. FP32 runs anywhere but roughly "
-            "doubles VRAM and time."
+            "doubles VRAM and time. INT8/INT4 store the frozen base model "
+            "quantized (bitsandbytes) — what fits 3B–7B models on an 8 GB card."
         )
 
         self.cmb_seq_len = QComboBox()

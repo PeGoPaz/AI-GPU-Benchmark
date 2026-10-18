@@ -91,7 +91,8 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, warmup_elapsed=5.0,
             return last
     mocks = {name: mock.MagicMock() for name in
              ("TrainingArguments", "AutoTokenizer", "AutoModelForCausalLM",
-              "load_dataset", "get_peft_model", "LoraConfig")}
+              "load_dataset", "get_peft_model", "LoraConfig",
+              "BitsAndBytesConfig")}
     with mock.patch.multiple(
         trainer_module,
         Trainer=FakeTrainer,
@@ -398,3 +399,62 @@ def test_checkpointing_is_off_by_default():
         "gradient_checkpointing"] is False
     base.enable_input_require_grads.assert_not_called()
     assert result["summary"]["gradient_checkpointing"] is False
+
+
+# --- quantized precision ------------------------------------------------------
+
+def _precision(label):
+    return next(s for s in trainer_module.PRECISIONS if s.label == label)
+
+
+def test_plain_dtypes_load_unquantized():
+    for label in ("BF16", "FP16", "FP32"):
+        result = run_worker(precision=_precision(label))
+        load_kwargs = result["mocks"]["AutoModelForCausalLM"] \
+            .from_pretrained.call_args.kwargs
+
+        assert load_kwargs["quantization_config"] is None, label
+        result["mocks"]["BitsAndBytesConfig"].assert_not_called()
+
+
+def test_int4_is_the_qlora_recipe():
+    result = run_worker(precision=_precision("INT4 (NF4)"))
+    bnb = result["mocks"]["BitsAndBytesConfig"]
+    load_kwargs = result["mocks"]["AutoModelForCausalLM"] \
+        .from_pretrained.call_args.kwargs
+
+    assert bnb.call_args.kwargs == {
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_use_double_quant": True,
+        "bnb_4bit_compute_dtype": trainer_module.torch.bfloat16,
+    }
+    assert load_kwargs["quantization_config"] is bnb.return_value
+
+
+def test_int8_loads_in_8bit_and_trains_in_fp16():
+    result = run_worker(precision=_precision("INT8"))
+    args = result["mocks"]["TrainingArguments"].call_args.kwargs
+
+    assert result["mocks"]["BitsAndBytesConfig"].call_args.kwargs == {
+        "load_in_8bit": True}
+    assert (args["fp16"], args["bf16"]) == (True, False)
+
+
+def test_quantized_runs_skip_the_fp32_upcast():
+    """prepare_model_for_kbit_training() upcasts embeddings and LM head to
+    FP32 — 4.4 GB on Qwen2.5 7B, enough to push the run past an 8 GB card."""
+    assert not hasattr(trainer_module, "prepare_model_for_kbit_training")
+
+
+def test_summary_records_the_quantized_precision():
+    summary = run_worker(precision=_precision("INT4 (NF4)"))["summary"]
+
+    assert summary["precision"] == "INT4 (NF4)"
+
+
+def test_unknown_bit_width_is_rejected():
+    spec = trainer_module.PrecisionSpec("INT3", "bfloat16", bf16=True,
+                                        fp16=False, quant_bits=3)
+    with pytest.raises(ValueError, match="3 bits"):
+        trainer_module.quantization_config(spec)

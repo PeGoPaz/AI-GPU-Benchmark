@@ -9,6 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
     Trainer,
     TrainerCallback,
     TrainingArguments,
@@ -62,23 +63,53 @@ class PrecisionSpec:
 
     dtype_name is resolved against torch at call time rather than stored as a
     dtype object, so the registry stays importable without torch present.
+
+    quant_bits marks a format where the frozen base weights are stored
+    quantized by bitsandbytes. dtype_name is then the compute dtype: the one
+    the weights are dequantized to for each matmul, and the one every
+    non-quantized layer (embeddings, norms, LM head) is kept in.
     """
 
     label: str
     dtype_name: str
     bf16: bool
     fp16: bool
+    quant_bits: int | None = None
 
 
 # BF16 needs Ampere or newer; FP16 works further back but has a much narrower
 # exponent range; FP32 runs anywhere and roughly doubles both VRAM and time.
+# INT8 and INT4 store the base model quantized — a half and a quarter of the
+# 16-bit footprint — which is what fits 3B–7B models on an 8 GB card. INT8
+# computes in FP16, the dtype LLM.int8 matmuls produce natively; INT4 is the
+# QLoRA recipe (NF4, double quantization) computing in BF16.
 PRECISIONS = (
     PrecisionSpec("BF16", "bfloat16", bf16=True, fp16=False),
     PrecisionSpec("FP16", "float16", bf16=False, fp16=True),
     PrecisionSpec("FP32", "float32", bf16=False, fp16=False),
+    PrecisionSpec("INT8", "float16", bf16=False, fp16=True, quant_bits=8),
+    PrecisionSpec("INT4 (NF4)", "bfloat16", bf16=True, fp16=False, quant_bits=4),
 )
 
 DEFAULT_PRECISION = PRECISIONS[0]
+
+
+def quantization_config(precision: PrecisionSpec):
+    """bitsandbytes settings for a quantized precision, None for a plain dtype."""
+    if precision.quant_bits is None:
+        return None
+    if precision.quant_bits == 4:
+        return BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            # Quantizes the quantization constants too: ~0.37 bits/param
+            # saved, about 0.3 GB on a 7B model.
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=getattr(torch, precision.dtype_name),
+        )
+    if precision.quant_bits == 8:
+        return BitsAndBytesConfig(load_in_8bit=True)
+    raise ValueError(f"Unsupported quantization: {precision.quant_bits} bits")
 
 # Tokens per training sequence. The heaviest knob on the panel: every layer's
 # compute grows with it, attention quadratically, and so does activation memory.
@@ -211,10 +242,18 @@ class TrainerWorker(QThread):
             self.status_updated.emit("Loading Base Model into VRAM...")
 
             # 2. Load Model
+            # peft's prepare_model_for_kbit_training() is deliberately not
+            # called for the quantized formats. Besides freezing the model,
+            # which get_peft_model() already does, it upcasts every
+            # non-quantized weight to FP32 — and on Qwen2.5 7B the untied
+            # 152k-token embedding and LM head alone become 4.4 GB, more than
+            # the whole 4-bit body. That would push the 7B run past an 8 GB
+            # card. The 16-bit runs keep those layers in BF16/FP16 as well.
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 device_map="cuda:0",
                 torch_dtype=getattr(torch, self.precision.dtype_name),
+                quantization_config=quantization_config(self.precision),
             )
 
             self.status_updated.emit("Applying LoRA Adapters...")
