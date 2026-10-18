@@ -9,3 +9,15 @@ pip install ./native          # from the repository root
 ```
 
 Building needs CMake 3.25+ and a C++17 compiler; pip fetches both pybind11 and scikit-build-core itself. No CUDA Toolkit is required.
+
+## C++ tests
+
+The sampler core is plain C++ and is tested without Python, using GoogleTest (fetched and pinned by CMake):
+
+```bash
+cmake -S native -B build -DPOWER_BUILD_PYTHON=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The ring buffer between the sampler thread and Python is lock-free — one producer, one consumer, two atomic counters with acquire/release ordering. Its stress test pushes a million items through a 1024-slot buffer from a second thread and checks nothing is lost or reordered; it is meant to be run under ThreadSanitizer, which flags a missing acquire/release pair as a data race even on runs where the values happen to come out right.

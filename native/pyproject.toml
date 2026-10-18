@@ -17,6 +17,7 @@ build-dir = "build/{wheel_tag}"
 
 [tool.scikit-build.cmake.define]
 POWER_BUILD_PYTHON = "ON"
+BUILD_TESTING = "OFF"
 
 # One version, kept in CMakeLists.txt.
 [tool.scikit-build.metadata.version]
