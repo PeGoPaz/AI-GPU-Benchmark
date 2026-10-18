@@ -10,6 +10,12 @@ pip install ./native          # from the repository root
 
 Building needs CMake 3.25+ and a C++17 compiler; pip fetches both pybind11 and scikit-build-core itself. No CUDA Toolkit is required.
 
+## Why NVML is loaded at run time
+
+The module neither links against `libnvidia-ml` nor includes `nvml.h`; it opens the library with `dlopen("libnvidia-ml.so.1")` and resolves the six entry points it needs by name — what pynvml does through ctypes. Linking would make the module unbuildable on a machine without the CUDA Toolkit and unimportable on one without an NVIDIA driver, and would leave the loader untestable in CI. The declarations it needs are copied into `include/power/nvml_api.hpp`, with `static_assert`s pinning the `nvmlFieldValue_t` layout field by field, because a mismatch there would not crash — it would silently read garbage.
+
+The tests build a fake `libnvidia-ml` (`tests/fake_nvml.cpp`) and load it by path through the same code, covering a missing library, a failed `nvmlInit`, a missing entry point and the actual readings, all without a GPU.
+
 ## C++ tests
 
 The sampler core is plain C++ and is tested without Python, using GoogleTest (fetched and pinned by CMake):
