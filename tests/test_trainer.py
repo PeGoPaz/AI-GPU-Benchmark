@@ -5,6 +5,8 @@ import textwrap
 import types
 from unittest import mock
 
+import pytest
+
 import app.core.trainer as trainer_module
 from app.core.trainer import PyQtProgressCallback, TrainerWorker
 
@@ -319,3 +321,51 @@ def test_fp32_asks_for_neither_half_flag():
 
     assert args["bf16"] is False
     assert args["fp16"] is False
+
+
+# --- sequence length & packing -----------------------------------------------
+
+def test_packing_fills_every_block_exactly():
+    blocks = trainer_module.pack_tokens([[1, 2, 3], [4, 5], [6, 7, 8, 9]], 4)
+
+    assert blocks == [[1, 2, 3, 4], [5, 6, 7, 8]]   # tail [9] dropped
+
+
+def test_packing_separates_texts_with_the_separator():
+    blocks = trainer_module.pack_tokens([[1, 2], [3, 4]], 3, separator=0)
+
+    assert blocks == [[1, 2, 0], [3, 4, 0]]
+
+
+def test_packing_too_little_text_is_an_error_not_an_empty_dataset():
+    """An empty dataset would surface deep inside HF as a confusing
+    division or index error, long after the actual cause."""
+    with pytest.raises(ValueError, match="fewer than one 64-token"):
+        trainer_module.pack_tokens([[1, 2, 3]], 64)
+
+
+def _pack_fn(result):
+    """The pack() closure run() handed to datasets.map, for calling directly."""
+    data = result["mocks"]["load_dataset"].return_value
+    return data["train"].map.return_value.map.call_args[0][0]
+
+
+def test_selected_sequence_length_drives_packing():
+    result = run_worker(seq_len=512)
+    result["mocks"]["AutoTokenizer"].from_pretrained.return_value.eos_token_id = 2
+
+    packed = _pack_fn(result)({"input_ids": [[7] * 300] * 4})["input_ids"]
+
+    assert packed and all(len(block) == 512 for block in packed)
+
+
+def test_whole_split_is_packed_in_one_pass():
+    """Per-batch packing drops a partial block at every 1000-row boundary."""
+    data = run_worker()["mocks"]["load_dataset"].return_value
+    pack_call = data["train"].map.return_value.map.call_args
+
+    assert pack_call.kwargs["batch_size"] is None
+
+
+def test_summary_records_the_sequence_length():
+    assert run_worker(seq_len=1024)["summary"]["seq_len"] == 1024

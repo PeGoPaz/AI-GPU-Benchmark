@@ -21,7 +21,13 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.telemetry import TelemetryWorker
-from app.core.trainer import MODELS, PRECISIONS, TrainerWorker
+from app.core.trainer import (
+    DEFAULT_SEQ_LEN,
+    MODELS,
+    PRECISIONS,
+    SEQ_LENGTHS,
+    TrainerWorker,
+)
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
 from app.utils.plots import draw_thermal_power, draw_utilization
@@ -90,6 +96,15 @@ class MainWindow(QMainWindow):
             "doubles VRAM and time."
         )
 
+        self.cmb_seq_len = QComboBox()
+        for length in SEQ_LENGTHS:
+            self.cmb_seq_len.addItem(f"{length} tokens", length)
+        self.cmb_seq_len.setCurrentIndex(SEQ_LENGTHS.index(DEFAULT_SEQ_LEN))
+        self.cmb_seq_len.setToolTip(
+            "Tokens per training sequence. Compute and activation memory grow "
+            "with it, attention quadratically — the main lever on run length."
+        )
+
         self.spin_warmup = QSpinBox()
         self.spin_warmup.setRange(0, 100)
         self.spin_warmup.setValue(10)
@@ -102,6 +117,7 @@ class MainWindow(QMainWindow):
         workload_layout.addRow("Steps:", self.spin_steps)
         workload_layout.addRow("Batch size:", self.spin_batch)
         workload_layout.addRow("Precision:", self.cmb_precision)
+        workload_layout.addRow("Sequence length:", self.cmb_seq_len)
         workload_layout.addRow("Warm-up steps:", self.spin_warmup)
         self.workload_group.setLayout(workload_layout)
         left_panel.addWidget(self.workload_group)
@@ -289,6 +305,7 @@ class MainWindow(QMainWindow):
             model=self.cmb_model.currentData(),
             warmup_steps=self.spin_warmup.value(),
             precision=self.cmb_precision.currentData(),
+            seq_len=self.cmb_seq_len.currentData(),
         )
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
@@ -380,6 +397,7 @@ class MainWindow(QMainWindow):
             ("Model", summary.get("model", "—")),
             ("Batch Size", str(summary.get("batch_size", "—"))),
             ("Precision", summary.get("precision", "—")),
+            ("Sequence Length", str(summary.get("seq_len", "—"))),
             ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),

@@ -80,6 +80,48 @@ PRECISIONS = (
 
 DEFAULT_PRECISION = PRECISIONS[0]
 
+# Tokens per training sequence. The heaviest knob on the panel: every layer's
+# compute grows with it, attention quadratically, and so does activation memory.
+SEQ_LENGTHS = (128, 256, 512, 1024, 2048)
+
+DEFAULT_SEQ_LEN = SEQ_LENGTHS[0]
+
+
+def pack_tokens(sequences: list[list[int]], seq_len: int,
+                separator: int | None = None) -> list[list[int]]:
+    """Concatenates tokenized texts and cuts them into blocks of exactly seq_len.
+
+    The dataset is short quotes, a few dozen tokens each. Padding every quote
+    out to the sequence length would make a 1024-token run over 95% padding:
+    the GPU still does the work, but the model learns from almost none of it.
+    Packing keeps every position real text. The separator (the EOS token)
+    marks where one quote ends and the next begins; the tail too short to
+    fill a block is dropped.
+    """
+    stream: list[int] = []
+    for ids in sequences:
+        stream.extend(ids)
+        if separator is not None:
+            stream.append(separator)
+
+    n_blocks = len(stream) // seq_len
+    if n_blocks == 0:
+        raise ValueError(
+            f"Dataset holds {len(stream)} tokens, fewer than one "
+            f"{seq_len}-token sequence."
+        )
+    return [stream[i * seq_len:(i + 1) * seq_len] for i in range(n_blocks)]
+
+
+def collate_packed(rows):
+    """Stacks packed rows into a batch. No padding, so the mask is all ones."""
+    input_ids = torch.tensor([row["input_ids"] for row in rows])
+    return {
+        "input_ids": input_ids,
+        "attention_mask": torch.ones_like(input_ids),
+        "labels": input_ids.clone(),
+    }
+
 
 class PyQtProgressCallback(TrainerCallback):
     """Custom Hugging Face callback to send progress back to the PyQt UI."""
@@ -120,13 +162,15 @@ class TrainerWorker(QThread):
 
     def __init__(self, steps: int = 150, batch_size: int = 4,
                  model: ModelSpec = DEFAULT_MODEL, warmup_steps: int = 10,
-                 precision: PrecisionSpec = DEFAULT_PRECISION, parent=None):
+                 precision: PrecisionSpec = DEFAULT_PRECISION,
+                 seq_len: int = DEFAULT_SEQ_LEN, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
         self.model_spec = model
         self.precision = precision
         self.warmup_steps = warmup_steps
+        self.seq_len = seq_len
         self.completed_steps = 0
         # Stays None until the timed window opens, which is how a run stopped
         # during warm-up is told apart from one that never started timing.
@@ -148,9 +192,19 @@ class TrainerWorker(QThread):
             tokenizer.pad_token = tokenizer.eos_token
 
             def tokenize(batch):
-                return tokenizer(batch["quote"], padding="max_length", truncation=True, max_length=128)
+                return tokenizer(batch["quote"])
 
-            tokenized_data = data["train"].map(tokenize, batched=True)
+            def pack(batch):
+                return {"input_ids": pack_tokens(batch["input_ids"], self.seq_len,
+                                                 tokenizer.eos_token_id)}
+
+            train_split = data["train"]
+            tokenized = train_split.map(tokenize, batched=True,
+                                        remove_columns=train_split.column_names)
+            # batch_size=None packs the whole split in one pass; per-batch
+            # packing would drop a partial block at every batch boundary.
+            packed = tokenized.map(pack, batched=True, batch_size=None,
+                                   remove_columns=tokenized.column_names)
 
             self.status_updated.emit("Loading Base Model into VRAM...")
 
@@ -189,17 +243,16 @@ class TrainerWorker(QThread):
 
             trainer = Trainer(
                 model=model,
-                train_dataset=tokenized_data,
+                train_dataset=packed,
                 args=training_args,
-                data_collator=lambda data: {'input_ids': torch.stack([torch.tensor(d['input_ids']) for d in data]),
-                                            'attention_mask': torch.stack([torch.tensor(d['attention_mask']) for d in data]),
-                                            'labels': torch.stack([torch.tensor(d['input_ids']) for d in data])},
+                data_collator=collate_packed,
                 callbacks=[PyQtProgressCallback(self)]
             )
 
             self.status_updated.emit(
                 f"Starting LoRA Fine-Tuning of {self.model_spec.label} "
-                f"in {self.precision.label} for {self.steps} steps..."
+                f"in {self.precision.label} at {self.seq_len} tokens "
+                f"for {self.steps} steps..."
             )
 
             start_time = time.time()
@@ -227,6 +280,7 @@ class TrainerWorker(QThread):
                 "model": self.model_spec.label,
                 "batch_size": self.batch_size,
                 "precision": self.precision.label,
+                "seq_len": self.seq_len,
                 "warmup_steps": self.warmup_steps,
                 "total_steps": steps_done,
                 "requested_steps": self.steps,
@@ -245,11 +299,11 @@ class TrainerWorker(QThread):
 
             # --- Instant VRAM Offload ---
             self.status_updated.emit("Offloading model from VRAM...")
-            # `tokenizer` is intentionally left bound: the tokenize() closure
-            # defined above still references it, and deleting it here would
+            # `tokenizer` is intentionally left bound: the tokenize() and pack()
+            # closures defined above still reference it, and deleting it here would
             # leave that closure with a dead cell (NameError if called again).
             # It holds no VRAM anyway — only the model and trainer do.
-            del trainer, model, tokenized_data, data, config, training_args
+            del trainer, model, packed, tokenized, train_split, data, config, training_args
             gc.collect()
             torch.cuda.empty_cache()
             self.status_updated.emit("VRAM freed.")
