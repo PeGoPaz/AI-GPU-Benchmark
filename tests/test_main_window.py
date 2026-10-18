@@ -534,7 +534,7 @@ def test_summary_reports_time_spent_throttled(window, telemetry_sample):
 
 
 def test_progress_line_shows_rate_and_time_left():
-    from app.ui.main_window import format_progress
+    from app.utils.display import format_progress
 
     assert format_progress(10, 310, None) == "Step 10 / 310"
     assert format_progress(10, 310, 2.0) == "Step 10 / 310 · 2.00 steps/s · ETA 2:30"

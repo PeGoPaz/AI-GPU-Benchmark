@@ -56,6 +56,18 @@ The GUI window opens with:
 - A **View → Dark theme** toggle covering the widgets, the stylesheet and the charts. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
+### Headless (SSH, cloud GPUs)
+
+The same benchmark runs without a window — for a rented cloud GPU reached over SSH, or for scripting runs across cards:
+
+```bash
+python main.py --headless --preset stress
+python main.py --headless --model qwen2.5-3b --precision int4 --seq-len 1024 --steps 200
+python main.py --list
+```
+
+Flags override the preset, and models and precisions can be named by label, Hugging Face id or any unique prefix (`int4`, `phi-3.5-mini`); an ambiguous one such as `qwen2.5` is refused with the candidates listed. Progress prints about twenty times per run, the summary table at the end, and the CSV, PNG and JSON report are always written to `--output-dir` (default `logs/`). Ctrl+C stops at the next step boundary and still writes the results. The exit status is 0 for a complete run, 130 for one stopped with Ctrl+C, and 1 for a failure — including no telemetry at all, since numbers without the card's readings are not worth keeping. Headless mode runs on a `QCoreApplication`, so it needs no display and never loads the widget stack.
+
 ---
 
 ## How It Works
@@ -114,8 +126,9 @@ A falling SM clock on its own does not say whether the card hit its power limit 
 ## Architecture
 
 ```
-main.py                        — entry point, launches the PyQt6 app
+main.py                        — entry point: the window, or a headless run with --headless
 app/
+  cli.py                       — headless mode: argument parsing, a run wired to stdout
   ui/
     main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
     style.py                   — light and dark palettes, the QPalette and stylesheet built from them
@@ -127,6 +140,7 @@ app/
     logger.py                  — BenchmarkLogger: collects telemetry in memory, returns a DataFrame, exports CSV + PNG
     plots.py                   — chart panels shared by the window's tabs and the exported PNG
     report.py                  — the versioned JSON run report written on export
+    display.py                 — summary rows and the progress line, shared by window and CLI
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
 pytest.ini                     — pytest configuration

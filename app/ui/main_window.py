@@ -1,5 +1,3 @@
-import time
-
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QSettings, Qt, QTimer, pyqtSlot
@@ -25,7 +23,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.metrics import compute_stats
 from app.core.telemetry import TelemetryWorker, decode_throttle_reasons
 from app.core.trainer import (
     DEFAULT_PRESET,
@@ -39,6 +36,7 @@ from app.core.trainer import (
     fits_in_vram,
 )
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
+from app.utils.display import RateTracker, format_progress, summary_rows
 from app.utils.logger import BenchmarkLogger
 from app.utils.plots import (
     apply_chart_theme,
@@ -54,18 +52,6 @@ SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 # arrives four times a second; redrawing that often would cost the UI thread
 # more than it shows.
 LIVE_REFRESH_MS = 1000
-
-
-def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
-    """The line under the progress bar: position, live rate and time left."""
-    text = f"Step {step} / {total}"
-    if steps_per_sec:
-        remaining = max(0, total - step) / steps_per_sec
-        minutes, seconds = divmod(int(round(remaining)), 60)
-        hours, minutes = divmod(minutes, 60)
-        eta = f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-        text += f" · {steps_per_sec:.2f} steps/s · ETA {eta}"
-    return text
 
 
 class MainWindow(QMainWindow):
@@ -321,7 +307,7 @@ class MainWindow(QMainWindow):
         self._loss_steps, self._loss_values = [], []
         self._run_warmup = 0
         self._total_steps = 0
-        self._first_step = None             # (monotonic time, step) of the first step
+        self._rate = RateTracker()
         self._live_timer = QTimer(self)
         self._live_timer.setInterval(LIVE_REFRESH_MS)
         self._live_timer.timeout.connect(self._refresh_live_charts)
@@ -580,7 +566,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.summary_group.setVisible(False)
         self._loss_steps, self._loss_values = [], []
-        self._first_step = None
+        self._rate = RateTracker()
         self._run_warmup = self.spin_warmup.value()
         self.lbl_progress.setText("Loading model…")
         # Visible from the start and redrawn as data arrives: a run on the
@@ -631,18 +617,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int)
     def _on_progress(self, step: int):
-        """Moves the bar and recomputes rate and ETA.
-
-        The rate is measured from the first completed step, not from Start:
-        model loading can take longer than the run itself on a cold cache,
-        and counting it would make every early ETA wildly pessimistic.
-        """
+        """Moves the bar and recomputes rate and ETA."""
         self.progress_bar.setValue(step)
-        now = time.monotonic()
-        if self._first_step is None:
-            self._first_step = (now, step)
-        first_time, first_step = self._first_step
-        rate = (step - first_step) / (now - first_time) if now > first_time else None
+        rate = self._rate.update(step)
         self.lbl_progress.setText(format_progress(step, self._total_steps, rate))
 
     @pyqtSlot(int, float)
@@ -733,62 +710,7 @@ class MainWindow(QMainWindow):
 
     def _render_summary(self, df, summary: dict):
         """Populates the summary table with computed benchmark metrics."""
-        stats = compute_stats(df, summary)
-
-        steps_label = f"{summary['total_steps']}"
-        if summary.get('aborted'):
-            steps_label += f" of {summary['requested_steps']} (stopped early)"
-
-        checkpointing = "—"
-        if "gradient_checkpointing" in summary:
-            checkpointing = "On" if summary["gradient_checkpointing"] else "Off"
-
-        metrics = [
-            ("Model", summary.get("model", "—")),
-            ("Batch Size", str(summary.get("batch_size", "—"))),
-            ("Precision", summary.get("precision", "—")),
-            ("Sequence Length", str(summary.get("seq_len", "—"))),
-            ("Gradient Checkpointing", checkpointing),
-            ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
-            ("Steps Completed", steps_label),
-            ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
-            ("Steps/sec", f"{summary['steps_per_sec']:.2f}"),
-        ]
-
-        # Throughput and energy need the timed window, which a run stopped
-        # during warm-up never opened.
-        if stats['tokens_per_sec'] is not None:
-            metrics.append(("Tokens/sec", f"{stats['tokens_per_sec']:,.0f}"))
-        if stats['est_tflops'] is not None:
-            metrics.append(("Compute (est. TFLOPS)", f"{stats['est_tflops']:.1f}"))
-        if stats['energy_j'] is not None:
-            metrics.append((f"Energy, timed (kJ, {stats['energy_source']})",
-                            f"{stats['energy_j'] / 1000:.2f}"))
-            metrics.append(("Efficiency (tokens/J)", f"{stats['tokens_per_joule']:.1f}"))
-
-        metrics += [
-            ("Avg Temp (°C)", f"{stats['avg_temp_c']:.1f}"),
-            ("Max Temp (°C)", f"{stats['max_temp_c']:.0f}"),
-            ("Avg Power (W)", f"{stats['avg_power_w']:.1f}"),
-            ("Peak Power (W)", f"{stats['peak_power_w']:.1f}"),
-            ("Avg VRAM (MiB)", f"{stats['avg_vram_mb']:.1f}"),
-            ("Peak VRAM (MiB)", f"{stats['peak_vram_mb']:.1f}"),
-        ]
-
-        # Optional hardware: memory temperature needs a GPU exposing the
-        # field, and fan and PCIe readings are absent on passive cards.
-        if stats['max_mem_temp_c'] is not None:
-            metrics.append(("Max Mem Temp (°C)", f"{stats['max_mem_temp_c']:.0f}"))
-        if stats['min_headroom_c'] is not None:
-            metrics.append(("Min Thermal Headroom (°C)", f"{stats['min_headroom_c']:.0f}"))
-        if stats['peak_fan_pct'] is not None:
-            metrics.append(("Peak Fan (%)", f"{stats['peak_fan_pct']:.0f}"))
-        if stats['power_limited_pct'] is not None:
-            metrics.append(("Time Power-Limited (%)", f"{stats['power_limited_pct']:.0f}"))
-            metrics.append(("Time Thermal-Limited (%)", f"{stats['thermal_limited_pct']:.0f}"))
-        if stats['pcie_gen_peak'] is not None and stats['pcie_width_peak'] is not None:
-            metrics.append(("PCIe Link (peak)",
-                            f"Gen{stats['pcie_gen_peak']:.0f} x{stats['pcie_width_peak']:.0f}"))
+        metrics = summary_rows(df, summary)
 
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):
