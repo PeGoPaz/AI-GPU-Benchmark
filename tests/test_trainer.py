@@ -458,3 +458,48 @@ def test_unknown_bit_width_is_rejected():
                                         fp16=False, quant_bits=3)
     with pytest.raises(ValueError, match="3 bits"):
         trainer_module.quantization_config(spec)
+
+
+# --- VRAM estimate ------------------------------------------------------------
+
+def _model(label_start):
+    return next(s for s in trainer_module.MODELS if s.label.startswith(label_start))
+
+
+def test_weight_estimate_matches_parameter_count():
+    """1.1B parameters at two bytes each is a little over 2 GiB."""
+    weights = trainer_module.estimate_weights_gib(_model("TinyLlama"), _precision("BF16"))
+
+    assert weights == pytest.approx(1.10e9 * 2 / 2**30)
+
+
+def test_fewer_bits_means_smaller_weights():
+    order = ("INT4 (NF4)", "INT8", "BF16", "FP32")
+    for model in trainer_module.MODELS:
+        sizes = [trainer_module.estimate_weights_gib(model, _precision(p)) for p in order]
+        assert sizes == sorted(sizes), model.label
+
+
+def test_quantization_leaves_embedding_and_head_at_16_bits():
+    """Treating all 7.6B parameters as 4-bit would claim 3.6 GiB; the 1.09B in
+    the embedding and LM head stay BF16 and add another 2 GiB on top."""
+    weights = trainer_module.estimate_weights_gib(_model("Qwen2.5 7B"),
+                                                  _precision("INT4 (NF4)"))
+
+    assert weights > 7.62e9 * 0.5 / 2**30 + 1.5
+
+
+def test_7b_fits_an_8gb_card_only_quantized_to_4_bits():
+    qwen7b = _model("Qwen2.5 7B")
+
+    assert trainer_module.fits_in_vram(qwen7b, _precision("INT4 (NF4)"), 8192)
+    assert not trainer_module.fits_in_vram(qwen7b, _precision("INT8"), 8192)
+    assert not trainer_module.fits_in_vram(qwen7b, _precision("BF16"), 8192)
+
+
+def test_fit_check_keeps_the_reserve_free():
+    tiny = _model("TinyLlama")
+    weights_mib = trainer_module.estimate_weights_gib(tiny, _precision("BF16")) * 1024
+
+    assert not trainer_module.fits_in_vram(tiny, _precision("BF16"), weights_mib + 512)
+    assert trainer_module.fits_in_vram(tiny, _precision("BF16"), weights_mib + 1024)

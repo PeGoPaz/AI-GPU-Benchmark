@@ -27,7 +27,10 @@ from app.core.trainer import (
     MODELS,
     PRECISIONS,
     SEQ_LENGTHS,
+    VRAM_RESERVE_GIB,
     TrainerWorker,
+    estimate_weights_gib,
+    fits_in_vram,
 )
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
@@ -129,6 +132,13 @@ class MainWindow(QMainWindow):
         workload_layout.addRow("Sequence length:", self.cmb_seq_len)
         workload_layout.addRow("Warm-up steps:", self.spin_warmup)
         workload_layout.addRow(self.chk_checkpointing)
+
+        # Updated whenever model or precision changes, and once the card's
+        # VRAM size is known from the first telemetry snapshot.
+        self.lbl_fit = QLabel()
+        self.lbl_fit.setObjectName("fitHint")
+        self.lbl_fit.setWordWrap(True)
+        workload_layout.addRow(self.lbl_fit)
         self.workload_group.setLayout(workload_layout)
         left_panel.addWidget(self.workload_group)
 
@@ -213,6 +223,11 @@ class MainWindow(QMainWindow):
         # Applied last, so every widget above is polished in one pass.
         self.setStyleSheet(STYLESHEET)
 
+        self._vram_total_mib = None          # MiB, from the first snapshot
+        self.cmb_model.currentIndexChanged.connect(self._update_fit_hint)
+        self.cmb_precision.currentIndexChanged.connect(self._update_fit_hint)
+        self._update_fit_hint()
+
         # --- INITIALIZE THREADS ---
         self.logger = BenchmarkLogger()
         self._last_telemetry_error = None
@@ -251,6 +266,9 @@ class MainWindow(QMainWindow):
     def update_telemetry_ui(self, data: dict):
         """Updates the dashboard with live PyNVML data."""
         self.logger.log(data)
+        if self._vram_total_mib is None and data.get('vram_total_mb'):
+            self._vram_total_mib = data['vram_total_mb']
+            self._update_fit_hint()
         self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
 
         if data.get('temp_memory') is not None:
@@ -294,6 +312,33 @@ class MainWindow(QMainWindow):
             text += f" (max Gen{gen_max} x{width_max})"
         return text
 
+    def _update_fit_hint(self):
+        """Shows the weights' footprint against the card, flagging a misfit.
+
+        A warning rather than a lock: the estimate covers weights only, and
+        someone may well want to watch a run hit the wall on purpose.
+        """
+        model = self.cmb_model.currentData()
+        precision = self.cmb_precision.currentData()
+        weights = estimate_weights_gib(model, precision)
+
+        if self._vram_total_mib is None:
+            text, misfit = f"Weights ≈ {weights:.1f} GiB", False
+        else:
+            total = self._vram_total_mib / 1024
+            misfit = not fits_in_vram(model, precision, self._vram_total_mib)
+            text = f"Weights ≈ {weights:.1f} GiB of {total:.1f} GiB VRAM"
+            if misfit:
+                text += (f" — too big: a run needs ~{VRAM_RESERVE_GIB:.0f} GiB "
+                         "free on top of the weights. Try INT4 or a smaller model.")
+
+        self.lbl_fit.setText(text)
+        # A dynamic property drives the stylesheet; Qt only re-reads it on a
+        # re-polish, so the colour would otherwise stick to the first state.
+        self.lbl_fit.setProperty("warning", misfit)
+        self.lbl_fit.style().unpolish(self.lbl_fit)
+        self.lbl_fit.style().polish(self.lbl_fit)
+
     def start_benchmark(self):
         """Disables UI and fires up the PyTorch training thread."""
         self.btn_start.setEnabled(False)
@@ -303,6 +348,8 @@ class MainWindow(QMainWindow):
         self.plot_tabs.setVisible(False)
         self.summary_group.setVisible(False)
         self.log_to_console("\n--- Starting Synthetic Workload ---")
+        if self.lbl_fit.property("warning"):
+            self.log_to_console(f"WARNING: {self.lbl_fit.text()}")
         self.logger.start()
 
         # Locked for the duration: the summary reports these values, so they

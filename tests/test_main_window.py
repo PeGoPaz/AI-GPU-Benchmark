@@ -375,3 +375,43 @@ def test_model_tooltips_name_the_checkpoint(window):
         spec = window.cmb_model.itemData(i)
         tip = window.cmb_model.itemData(i, Qt.ItemDataRole.ToolTipRole)
         assert spec.model_id in tip
+
+
+def _select(combo, text_start):
+    index = next(i for i in range(combo.count())
+                 if combo.itemText(i).startswith(text_start))
+    combo.setCurrentIndex(index)
+
+
+def test_fit_hint_shows_weights_before_the_gpu_is_known(window):
+    assert window.lbl_fit.text().startswith("Weights ≈ ")
+    assert window.lbl_fit.property("warning") is False
+
+
+def test_fit_hint_warns_when_the_model_will_not_fit(window, telemetry_sample):
+    window.update_telemetry_ui(telemetry_sample(0, vram_total_mb=8192))
+    _select(window.cmb_model, "Qwen2.5 7B")
+    _select(window.cmb_precision, "BF16")
+
+    assert window.lbl_fit.property("warning") is True
+    assert "of 8.0 GiB" in window.lbl_fit.text()
+    assert "INT4" in window.lbl_fit.text()
+
+    _select(window.cmb_precision, "INT4")
+
+    assert window.lbl_fit.property("warning") is False
+
+
+def test_misfit_is_a_warning_not_a_lock(window, telemetry_sample, monkeypatch):
+    """The estimate covers weights only, so Start stays usable — but the
+    console says up front why the run is likely to die."""
+    import app.ui.main_window as mw
+    monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
+    window.update_telemetry_ui(telemetry_sample(0, vram_total_mb=8192))
+    _select(window.cmb_model, "Qwen2.5 7B")
+    _select(window.cmb_precision, "BF16")
+
+    window.start_benchmark()
+
+    assert window.trainer._started
+    assert "WARNING: Weights" in window.console.toPlainText()

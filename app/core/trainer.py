@@ -32,6 +32,10 @@ class ModelSpec:
     # Parameter count in billions, as published on the model card. Known up
     # front so memory and throughput can be estimated before any download.
     params_b: float
+    # The token embedding plus LM head (counted once when tied). bitsandbytes
+    # leaves both unquantized, so at 4 bits they can be a large share of the
+    # footprint: Qwen2.5 7B's 152k vocabulary keeps 1.09B parameters at 16 bits.
+    embed_params_b: float
 
 
 # Ungated on the Hub on purpose — a gated model would fail the download with
@@ -39,19 +43,19 @@ class ModelSpec:
 # first; from 3B up the weights alone outgrow an 8 GB card at 16 bits.
 MODELS = (
     ModelSpec("TinyLlama 1.1B", "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-              ("q_proj", "v_proj"), params_b=1.10),
+              ("q_proj", "v_proj"), params_b=1.10, embed_params_b=0.13),
     ModelSpec("Qwen2.5 1.5B", "Qwen/Qwen2.5-1.5B-Instruct",
-              ("q_proj", "v_proj"), params_b=1.54),
+              ("q_proj", "v_proj"), params_b=1.54, embed_params_b=0.23),
     ModelSpec("Phi-2 2.7B", "microsoft/phi-2",
-              ("q_proj", "v_proj"), params_b=2.78),
+              ("q_proj", "v_proj"), params_b=2.78, embed_params_b=0.26),
     ModelSpec("Qwen2.5 3B", "Qwen/Qwen2.5-3B-Instruct",
-              ("q_proj", "v_proj"), params_b=3.09),
+              ("q_proj", "v_proj"), params_b=3.09, embed_params_b=0.31),
     # Phi-3 fuses query, key and value into a single projection, so there is
     # no q_proj or v_proj to attach to — the case lora_targets exists for.
     ModelSpec("Phi-3.5 mini 3.8B", "microsoft/Phi-3.5-mini-instruct",
-              ("qkv_proj",), params_b=3.82),
+              ("qkv_proj",), params_b=3.82, embed_params_b=0.20),
     ModelSpec("Qwen2.5 7B", "Qwen/Qwen2.5-7B-Instruct",
-              ("q_proj", "v_proj"), params_b=7.62),
+              ("q_proj", "v_proj"), params_b=7.62, embed_params_b=1.09),
 )
 
 DEFAULT_MODEL = MODELS[0]
@@ -92,6 +96,40 @@ PRECISIONS = (
 )
 
 DEFAULT_PRECISION = PRECISIONS[0]
+
+
+_DTYPE_BYTES = {"float32": 4, "float16": 2, "bfloat16": 2}
+
+# What a run needs beyond the weights before it can take a single step: the
+# CUDA context, cuBLAS workspaces and the smallest batch's activations. A
+# floor, not a forecast — real activation memory scales with batch and
+# sequence length on top of it.
+VRAM_RESERVE_GIB = 1.0
+
+
+def estimate_weights_gib(model: ModelSpec, precision: PrecisionSpec) -> float:
+    """Approximate VRAM the base model's weights occupy once loaded.
+
+    Quantized formats only shrink the transformer body; embedding and LM head
+    stay in the compute dtype. 4-bit adds about 3% for its quantization
+    constants, even after double quantization.
+    """
+    compute_bytes = _DTYPE_BYTES[precision.dtype_name]
+    if precision.quant_bits is None:
+        total_bytes = model.params_b * 1e9 * compute_bytes
+    else:
+        body = model.params_b - model.embed_params_b
+        overhead = 1.03 if precision.quant_bits == 4 else 1.0
+        total_bytes = (body * 1e9 * precision.quant_bits / 8 * overhead
+                       + model.embed_params_b * 1e9 * compute_bytes)
+    return total_bytes / 2**30
+
+
+def fits_in_vram(model: ModelSpec, precision: PrecisionSpec,
+                 vram_total_mib: float) -> bool:
+    """Whether the weights leave at least the reserve free on this card."""
+    budget_gib = vram_total_mib / 1024 - VRAM_RESERVE_GIB
+    return estimate_weights_gib(model, precision) <= budget_gib
 
 
 def quantization_config(precision: PrecisionSpec):

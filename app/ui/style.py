@@ -26,6 +26,8 @@ EXPORT_BLUE_PRESSED = "#3A6E99"
 DISABLED_BG = "#3C3C3C"
 DISABLED_FG = "#8A8A8A"
 
+WARNING_AMBER = "#D08A00"
+
 CONSOLE_BG = "#1E1E1E"
 CONSOLE_FG = "#00FF00"
 
@@ -70,6 +72,15 @@ QPushButton#btnStop:disabled,
 QPushButton#btnExport:disabled {{
     background-color: {DISABLED_BG};
     color: {DISABLED_FG};
+}}
+
+QLabel#fitHint {{
+    color: {DISABLED_FG};
+}}
+
+QLabel#fitHint[warning="true"] {{
+    color: {WARNING_AMBER};
+    font-weight: bold;
 }}
 
 QTextEdit#console {{
