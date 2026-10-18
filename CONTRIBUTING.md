@@ -27,6 +27,15 @@ mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
+For the C++ part in `native/`:
+
+```bash
+cmake -S native -B build -DPOWER_BUILD_PYTHON=OFF -DPOWER_WARNINGS_AS_ERRORS=ON
+cmake --build build && ctest --test-dir build --output-on-failure
+cmake -S native -B build-tsan -DPOWER_BUILD_PYTHON=OFF -DPOWER_SANITIZE=thread   # and the same again
+clang-format -i $(git ls-files 'native/*.cpp' 'native/*.hpp')
+```
+
 `tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. CI does the same on every push and PR: ruff, mypy, a parse check, and pytest on Python 3.10 and 3.13. Rules live in `ruff.toml` and `mypy.ini`; both tools are pinned in `requirements-dev.txt`, because their default rule sets shift between releases and an unpinned upgrade could turn CI red without a line of project code changing.
 
 ## House rules

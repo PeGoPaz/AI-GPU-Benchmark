@@ -21,6 +21,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(POWER_BUILD_PYTHON "Build the nvml_sampler Python module" ON)
 option(POWER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (CI)" OFF)
+set(POWER_SANITIZE "" CACHE STRING
+    "Sanitizers to build everything with, e.g. address,undefined or thread")
+
+# Applied to every target, GoogleTest included: ThreadSanitizer in particular
+# reports false races when only part of the program is instrumented.
+if(POWER_SANITIZE)
+    add_compile_options(-fsanitize=${POWER_SANITIZE} -fno-omit-frame-pointer
+                        -fno-sanitize-recover=all)
+    add_link_options(-fsanitize=${POWER_SANITIZE})
+endif()
 
 # Warnings for our own targets only — third-party headers come in as SYSTEM.
 add_library(power_warnings INTERFACE)

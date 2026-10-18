@@ -143,7 +143,7 @@ app/
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
-.github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
+.github/workflows/ci.yml       — CI: ruff, mypy, tests on Python 3.10 and 3.13; native build, sanitizers, clang-format
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 mypy.ini                       — type-check settings
@@ -176,7 +176,7 @@ mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
+`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13. The native module gets its own jobs: a warnings-as-errors build with the C++ tests on Linux and macOS, the same tests under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer, a pinned `clang-format` check, and the Python-side tests against the freshly built module. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
 
 ### Native module (optional)
 
