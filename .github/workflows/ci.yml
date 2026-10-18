@@ -135,6 +135,11 @@ jobs:
       - name: Python tests against the module
         run: pytest -v tests/test_native_sampler.py
 
+      # A short run, only to keep the script working; the numbers on a
+      # shared runner mean little.
+      - name: Sampler benchmark (smoke)
+        run: python native/bench/sampler_bench.py --seconds 0.5
+
   native-sanitizers:
     name: Native sanitizers (${{ matrix.sanitize }})
     runs-on: ubuntu-latest

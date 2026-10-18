@@ -191,7 +191,30 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 pip install ./native
 ```
 
-That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML reachable, the Thermal & Power chart draws instantaneous power faintly behind the 250 ms polls (thinned to a min/max envelope for drawing, so single-sample spikes survive), the summary gains the transient rows above, and export adds `logs/power_<timestamp>.csv` with every sample. The telemetry thread starts it alongside its own polling, drains it on every 250 ms poll, and the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`. The window and the headless run both say in one line at start-up whether native sampling is active, and if not, why: module not built, no driver, or a card without a power reading. In every one of those cases telemetry carries on exactly as before. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
+That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML is reachable, the telemetry thread starts it next to its own 250 ms polling and drains it on every poll:
+
+- the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`;
+- the Thermal & Power chart draws instantaneous power faintly behind the polls, thinned to a min/max envelope so that single-sample spikes survive the drawing;
+- the summary gains the transient rows above, the report a `power_sampler` section, and export adds `logs/power_<timestamp>.csv` with every sample.
+
+The window and the headless run both say at start-up whether native sampling is active and, if not, why — module not built, no driver, or a card without a power reading — and in each of those cases telemetry carries on exactly as before. The module's own tests (`tests/test_native_sampler.py`) skip themselves unless it is installed, so the regular suite stays a pure-Python install. How the C++ side works — loading NVML at run time, the lock-free ring buffer, the sampling cadence — is in [native/README.md](native/README.md).
+
+### Why the sampler is C++
+
+A Python thread can poll NVML every millisecond too — as long as nothing else in the process wants the GIL. During a benchmark, plenty does: the window redraws its charts once a second, pandas aggregates the telemetry, and every Python thread waiting for the GIL gets it only when the holder lets go, at most every switch interval (5 ms by default). The native thread never asks for it. `native/bench/sampler_bench.py` measures exactly that difference: both samplers aim for the same 1 kHz cadence and skip missed slots the same way, while the main thread sleeps, spins in pure Python, or does a dashboard's worth of DataFrame and chart work.
+
+Measured on macOS (Apple M3), Python 3.13.7, scripted source, 1000 µs target (1000 Hz), 5 s per scenario.
+
+| Main thread | Sampler | Rate (Hz) | Gap p50 (ms) | Gap p99 (ms) | Gap max (ms) |
+|---|---|---|---|---|---|
+| idle | native (C++) | 1000 | 1.00 | 1.33 | 2.33 |
+| idle | Python thread | 1000 | 1.00 | 1.32 | 1.61 |
+| gil-bound | native (C++) | 1000 | 1.00 | 1.01 | 1.52 |
+| gil-bound | Python thread | 136 | 7.50 | 8.70 | 8.93 |
+| dashboard | native (C++) | 1000 | 1.00 | 1.42 | 1.50 |
+| dashboard | Python thread | 541 | 1.89 | 4.41 | 19.59 |
+
+With the main thread idle the two are indistinguishable — which is the point: the Python thread's problem is not Python's speed but the GIL. Spinning in pure Python cuts it to a reading every ~7 ms, and dashboard-style work leaves gaps of up to ~20 ms, long enough to miss a transient entirely; the native thread keeps 1 kHz throughout. These numbers use the scripted source, so they isolate scheduling from driver cost. On a Linux box with an NVIDIA card, `python native/bench/sampler_bench.py --source nvml` repeats the measurement with both samplers reading the real instant-power field.
 
 ---
 

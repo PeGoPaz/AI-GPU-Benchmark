@@ -41,6 +41,15 @@ print(sampler.stats())                         # reads, errors, dropped, changes
 - **Stopping.** The thread sleeps on a condition variable rather than in `sleep_until`, so `stop()` wakes it immediately even with a long interval; the read itself happens outside the lock, so `stop()` never waits on the driver.
 - **Honest rate.** The driver refreshes its reading less often than it can be asked. Besides reads, errors and drops, the sampler counts *changes* — reads whose value differed from the previous one — which is the rate at which new information actually arrived, and what the report shows.
 
+## Benchmark
+
+```bash
+python native/bench/sampler_bench.py                 # scripted source, any machine
+python native/bench/sampler_bench.py --source nvml   # both samplers on the real card
+```
+
+Compares this sampler with a pure-Python sampling thread while the main thread is idle, GIL-bound or doing dashboard work; results are in the main README under "Why the sampler is C++".
+
 ## C++ tests
 
 The sampler core is plain C++ and is tested without Python, using GoogleTest (fetched and pinned by CMake):
