@@ -26,6 +26,38 @@ _VALUE_READERS = {
 }
 
 
+# Why the clock is below its maximum, as a bitmask. The values are nvml.h's
+# and are written out here rather than taken from pynvml, because NVML is
+# renaming the constants (ClocksThrottleReason* → ClocksEventReason*, the old
+# names due to go with CUDA 14) while the bits themselves stay the same.
+THROTTLE_SW_POWER_CAP = 0x04
+THROTTLE_HW_SLOWDOWN = 0x08
+THROTTLE_SW_THERMAL = 0x20
+THROTTLE_HW_THERMAL = 0x40
+THROTTLE_HW_POWER_BRAKE = 0x80
+
+# Only the reasons that hold a working card back. NVML also reports GpuIdle,
+# SyncBoost and the application/display clock settings, but those are the
+# card resting or obeying a setting, not running out of power or cooling.
+THROTTLE_LABELS = (
+    (THROTTLE_SW_POWER_CAP, "Power cap"),
+    (THROTTLE_HW_POWER_BRAKE, "Power brake"),
+    (THROTTLE_SW_THERMAL, "Thermal"),
+    (THROTTLE_HW_THERMAL, "Thermal (HW)"),
+    (THROTTLE_HW_SLOWDOWN, "HW slowdown"),
+)
+
+POWER_LIMIT_BITS = THROTTLE_SW_POWER_CAP | THROTTLE_HW_POWER_BRAKE
+THERMAL_LIMIT_BITS = THROTTLE_SW_THERMAL | THROTTLE_HW_THERMAL
+
+
+def decode_throttle_reasons(mask: int | None) -> list[str]:
+    """Human-readable reasons in a throttle bitmask; empty when unthrottled."""
+    if not mask:
+        return []
+    return [label for bit, label in THROTTLE_LABELS if int(mask) & bit]
+
+
 def read_field_values(handle, field_ids: list[int]) -> dict[int, float]:
     """Reads NVML field values, returning {field_id: value} for successful reads.
 
@@ -88,6 +120,23 @@ def read_pcie_link(handle) -> tuple[int | None, int | None]:
     """
     return (_try_read(pynvml.nvmlDeviceGetCurrPcieLinkGeneration, handle),
             _try_read(pynvml.nvmlDeviceGetCurrPcieLinkWidth, handle))
+
+
+def read_throttle_reasons(handle) -> int | None:
+    """The current throttle bitmask, None if the driver cannot say.
+
+    The getter was renamed along with the constants. Newer drivers answer
+    the new name; drivers older than the rename only know the old one.
+    """
+    for name in ("nvmlDeviceGetCurrentClocksEventReasons",
+                 "nvmlDeviceGetCurrentClocksThrottleReasons"):
+        getter = getattr(pynvml, name, None)
+        if getter is None:
+            continue
+        mask = _try_read(getter, handle)
+        if mask is not None:
+            return mask
+    return None
 
 
 class TelemetryWorker(QThread):
@@ -168,6 +217,11 @@ class TelemetryWorker(QThread):
                 #    power it misses no spike between two polls.
                 energy_mj = _try_read(pynvml.nvmlDeviceGetTotalEnergyConsumption, handle)
 
+                # 9. Why the clock is where it is. A falling SM clock on its
+                #    own does not say whether the card hit its power limit or
+                #    its temperature limit; this does.
+                throttle = read_throttle_reasons(handle)
+
                 # Package stats into a telemetry snapshot
                 telemetry = {
                     "timestamp": time.time(),
@@ -186,6 +240,7 @@ class TelemetryWorker(QThread):
                     "pcie_gen_max": pcie_gen_max,
                     "pcie_width_max": pcie_width_max,
                     "energy_mj": energy_mj,          # None before Volta
+                    "throttle_reasons": throttle,    # bitmask, None if unknown
                 }
 
                 # Broadcast data to UI

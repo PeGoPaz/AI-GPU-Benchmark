@@ -74,6 +74,10 @@ QPushButton#btnExport:disabled {{
     color: {DISABLED_FG};
 }}
 
+QLabel[role="metric"][warning="true"] {{
+    color: {WARNING_AMBER};
+}}
+
 QLabel#fitHint {{
     color: {DISABLED_FG};
 }}

@@ -106,3 +106,22 @@ def test_summary_without_token_counts_still_computes_thermals(telemetry_sample):
 
     assert stats["tokens_per_sec"] is None
     assert stats["max_temp_c"] == 73
+
+
+def test_share_of_time_power_and_thermal_limited(telemetry_sample):
+    from app.core import telemetry
+
+    df = _df(telemetry_sample, n=4)
+    df["throttle_reasons"] = [0, telemetry.THROTTLE_SW_POWER_CAP,
+                              telemetry.THROTTLE_SW_POWER_CAP | telemetry.THROTTLE_HW_THERMAL,
+                              0x01]                                  # idle only
+    stats = metrics.compute_stats(df, _summary(measure_start=None, measure_end=None))
+
+    assert stats["power_limited_pct"] == 50.0
+    assert stats["thermal_limited_pct"] == 25.0
+
+
+def test_driver_without_throttle_reasons_reports_none(telemetry_sample):
+    stats = metrics.compute_stats(_df(telemetry_sample, throttle_reasons=None), _summary())
+
+    assert stats["power_limited_pct"] is None

@@ -10,6 +10,8 @@ normalises that, and the energy figures say what the throughput cost.
 """
 import pandas as pd
 
+from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
+
 
 def flops_per_token(params_b: float, gradient_checkpointing: bool) -> float:
     """Approximate training FLOPs per token for LoRA on a frozen base model.
@@ -55,6 +57,16 @@ def energy_joules(df: pd.DataFrame) -> tuple[float | None, str | None]:
     return None, None
 
 
+def limited_share(df: pd.DataFrame, bits: int) -> float | None:
+    """Percentage of polls in which any of the given throttle bits was set."""
+    if 'throttle_reasons' not in df.columns:
+        return None
+    masks = df['throttle_reasons'].dropna()
+    if masks.empty:
+        return None
+    return float((masks.astype('int64') & bits).astype(bool).mean() * 100)
+
+
 def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     """max/min/mean of an optional column, None when it was never reported."""
     if column not in df.columns or not df[column].notna().any():
@@ -87,7 +99,16 @@ def compute_stats(df: pd.DataFrame, summary: dict) -> dict:
         'energy_j': None,
         'energy_source': None,
         'tokens_per_joule': None,
+        'power_limited_pct': None,
+        'thermal_limited_pct': None,
     }
+
+    # Over the measured steps when there were any, else over the whole run:
+    # loading and warm-up rarely throttle and would only dilute the share.
+    window = timed_window(df, summary.get('measure_start'), summary.get('measure_end'))
+    throttle_rows = window if len(window) else df
+    stats['power_limited_pct'] = limited_share(throttle_rows, POWER_LIMIT_BITS)
+    stats['thermal_limited_pct'] = limited_share(throttle_rows, THERMAL_LIMIT_BITS)
 
     tokens_per_step = summary.get('tokens_per_step')
     elapsed = summary.get('elapsed_time_sec') or 0.0
@@ -102,7 +123,6 @@ def compute_stats(df: pd.DataFrame, summary: dict) -> dict:
                                 bool(summary.get('gradient_checkpointing')))
         stats['est_tflops'] = stats['tokens_per_sec'] * flops / 1e12
 
-    window = timed_window(df, summary.get('measure_start'), summary.get('measure_end'))
     energy, source = energy_joules(window)
     if energy:
         stats['energy_j'] = energy

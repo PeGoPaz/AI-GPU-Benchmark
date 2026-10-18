@@ -40,6 +40,7 @@ def telemetry_sample():
             "pcie_gen_max": 4,
             "pcie_width_max": 16,
             "energy_mj": 1_000_000 + i * 250_000,
+            "throttle_reasons": 0,
         }
         s.update(overrides)
         return s

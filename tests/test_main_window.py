@@ -486,3 +486,37 @@ def test_summary_reports_tokens_compute_and_energy(window, telemetry_sample):
     assert rows["Energy, timed (kJ, counter)"] == "1.00"     # 4 s × 250 J/s
     assert rows["Efficiency (tokens/J)"] == "409.6"
     assert "20,480 tokens/sec" in window.console.toPlainText()
+
+
+def test_throttle_label_names_the_reason(window, telemetry_sample):
+    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+
+    window.update_telemetry_ui(telemetry_sample(0, throttle_reasons=THROTTLE_SW_POWER_CAP))
+    assert window.lbl_throttle.text() == "Throttle: Power cap"
+    assert window.lbl_throttle.property("warning") is True
+
+    window.update_telemetry_ui(telemetry_sample(1, throttle_reasons=0))
+    assert window.lbl_throttle.text() == "Throttle: none"
+    assert window.lbl_throttle.property("warning") is False
+
+
+def test_throttle_label_without_driver_support(window, telemetry_sample):
+    window.update_telemetry_ui(telemetry_sample(0, throttle_reasons=None))
+
+    assert window.lbl_throttle.text() == "Throttle: N/A"
+
+
+def test_summary_reports_time_spent_throttled(window, telemetry_sample):
+    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+
+    window.logger.start()
+    for i in range(4):
+        window.logger.log(telemetry_sample(
+            i, throttle_reasons=THROTTLE_SW_POWER_CAP if i % 2 else 0))
+    _finish = {"total_steps": 150, "requested_steps": 150, "aborted": False,
+               "elapsed_time_sec": 70.0, "steps_per_sec": 2.14}
+    window.on_benchmark_finished(_finish)
+
+    rows = _summary_rows(window)
+    assert rows["Time Power-Limited (%)"] == "50"
+    assert rows["Time Thermal-Limited (%)"] == "0"

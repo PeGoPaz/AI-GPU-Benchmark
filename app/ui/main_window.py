@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.metrics import compute_stats
-from app.core.telemetry import TelemetryWorker
+from app.core.telemetry import TelemetryWorker, decode_throttle_reasons
 from app.core.trainer import (
     DEFAULT_PRESET,
     MODELS,
@@ -64,10 +64,15 @@ class MainWindow(QMainWindow):
         self.lbl_vram = QLabel("VRAM: -- / -- MiB")
         self.lbl_fan = QLabel("Fan: -- %")
         self.lbl_pcie = QLabel("PCIe: --")
+        self.lbl_throttle = QLabel("Throttle: --")
+        self.lbl_throttle.setToolTip(
+            "Why the clock is below its maximum, straight from the driver: "
+            "power cap, power brake, or thermal slowdown."
+        )
 
         for lbl in [self.lbl_temp, self.lbl_mem_temp, self.lbl_headroom,
                     self.lbl_power, self.lbl_clock, self.lbl_vram,
-                    self.lbl_fan, self.lbl_pcie]:
+                    self.lbl_fan, self.lbl_pcie, self.lbl_throttle]:
             lbl.setProperty("role", "metric")
             hw_layout.addWidget(lbl)
 
@@ -308,6 +313,21 @@ class MainWindow(QMainWindow):
         self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
         self.lbl_fan.setText(self._format_fan(data))
         self.lbl_pcie.setText(self._format_pcie(data))
+        self._show_throttle(data.get('throttle_reasons'))
+
+    def _show_throttle(self, mask):
+        reasons = decode_throttle_reasons(mask)
+        if mask is None:
+            self.lbl_throttle.setText("Throttle: N/A")
+        else:
+            self.lbl_throttle.setText(f"Throttle: {', '.join(reasons) or 'none'}")
+
+        # Re-polished only on a change of state: this runs four times a second.
+        throttled = bool(reasons)
+        if self.lbl_throttle.property("warning") != throttled:
+            self.lbl_throttle.setProperty("warning", throttled)
+            self.lbl_throttle.style().unpolish(self.lbl_throttle)
+            self.lbl_throttle.style().polish(self.lbl_throttle)
 
     @staticmethod
     def _format_fan(data: dict) -> str:
@@ -551,6 +571,9 @@ class MainWindow(QMainWindow):
             metrics.append(("Min Thermal Headroom (°C)", f"{stats['min_headroom_c']:.0f}"))
         if stats['peak_fan_pct'] is not None:
             metrics.append(("Peak Fan (%)", f"{stats['peak_fan_pct']:.0f}"))
+        if stats['power_limited_pct'] is not None:
+            metrics.append(("Time Power-Limited (%)", f"{stats['power_limited_pct']:.0f}"))
+            metrics.append(("Time Thermal-Limited (%)", f"{stats['thermal_limited_pct']:.0f}"))
         if stats['pcie_gen_peak'] is not None and stats['pcie_width_peak'] is not None:
             metrics.append(("PCIe Link (peak)",
                             f"Gen{stats['pcie_gen_peak']:.0f} x{stats['pcie_width_peak']:.0f}"))

@@ -204,3 +204,48 @@ def test_pre_volta_card_has_no_energy_counter(monkeypatch):
 
     assert not errors
     assert snapshots[0]["energy_mj"] is None
+
+
+# --- throttle reasons ---------------------------------------------------------
+
+def test_throttle_bits_match_nvml():
+    """Written out locally because NVML is renaming the constants; the bits
+    must still be the driver's."""
+    assert telemetry.THROTTLE_SW_POWER_CAP == pynvml.nvmlClocksThrottleReasonSwPowerCap
+    assert telemetry.THROTTLE_HW_SLOWDOWN == pynvml.nvmlClocksThrottleReasonHwSlowdown
+    assert telemetry.THROTTLE_SW_THERMAL == pynvml.nvmlClocksThrottleReasonSwThermalSlowdown
+    assert telemetry.THROTTLE_HW_THERMAL == pynvml.nvmlClocksThrottleReasonHwThermalSlowdown
+    assert telemetry.THROTTLE_HW_POWER_BRAKE == \
+        pynvml.nvmlClocksThrottleReasonHwPowerBrakeSlowdown
+
+
+def test_decode_names_each_limiting_reason():
+    mask = telemetry.THROTTLE_SW_POWER_CAP | telemetry.THROTTLE_SW_THERMAL
+
+    assert telemetry.decode_throttle_reasons(mask) == ["Power cap", "Thermal"]
+
+
+def test_idle_and_settings_bits_are_not_throttling():
+    """GpuIdle (0x1) and SyncBoost (0x10) are the card resting, not held back."""
+    assert telemetry.decode_throttle_reasons(0x01 | 0x10) == []
+    assert telemetry.decode_throttle_reasons(None) == []
+
+
+def test_throttle_read_falls_back_to_the_old_getter(monkeypatch):
+    """Drivers older than the rename only know the ThrottleReasons name."""
+    def missing(_h):
+        raise Exception("NVML_ERROR_FUNCTION_NOT_FOUND")
+
+    monkeypatch.setattr(pynvml, "nvmlDeviceGetCurrentClocksEventReasons", missing)
+    monkeypatch.setattr(pynvml, "nvmlDeviceGetCurrentClocksThrottleReasons",
+                        lambda h: telemetry.THROTTLE_SW_POWER_CAP)
+
+    assert telemetry.read_throttle_reasons("handle") == telemetry.THROTTLE_SW_POWER_CAP
+
+
+def test_snapshot_carries_the_throttle_mask(monkeypatch):
+    _patch_nvml(monkeypatch,
+                nvmlDeviceGetCurrentClocksEventReasons=lambda h: 0x04)
+    snapshots, _ = _one_poll(telemetry.TelemetryWorker(interval_ms=1))
+
+    assert snapshots[0]["throttle_reasons"] == 0x04
