@@ -90,22 +90,37 @@ def test_invalid_interval_is_a_value_error():
         scripted_sampler([100_000], interval_us=0)
 
 
-def test_sampling_continues_while_python_holds_the_gil():
-    """The reason this module is C++. A pure-Python busy loop holds the GIL
-    for its whole duration; a Python sampling thread would get a turn only
-    every switch interval (5 ms by default), and every slice it got would
-    be time the busy loop itself loses. The native thread never asks."""
+def _spin(seconds):
+    """Pure Python for the whole duration: the GIL is never released."""
+    deadline = time.perf_counter() + seconds
+    while time.perf_counter() < deadline:
+        pass
+
+
+def _sample_while(main_thread_work, seconds=0.2):
     sampler = scripted_sampler([100_000, 200_000], interval_us=1000)
     sampler.start()
-    deadline = time.perf_counter() + 0.2
-    spins = 0
-    while time.perf_counter() < deadline:      # pure Python, GIL held throughout
-        spins += 1
+    main_thread_work(seconds)
     sampler.stop()
-    seconds, _ = sampler.drain()
+    return len(sampler.drain()[0]), sampler.stats()["worst_gap_ms"]
 
-    assert len(seconds) >= 100                 # 200 at a perfect 1 ms
-    assert sampler.stats()["worst_gap_ms"] < 50
+
+def test_sampling_continues_while_python_holds_the_gil():
+    """The reason this module is C++. A Python sampling thread gets the GIL
+    from a busy loop only once per switch interval (5 ms by default), so it
+    falls to a fraction of its idle rate — ~14% in native/bench. The native
+    thread never asks for the GIL and keeps its rate.
+
+    Compared against the same sampler with the main thread idle rather than
+    against the nominal 1 kHz: a virtualised CI runner's timers can stretch
+    a 1 ms sleep to 2 ms or more, which slows both runs alike and says
+    nothing about the GIL.
+    """
+    idle, _ = _sample_while(time.sleep)
+    busy, worst_gap_ms = _sample_while(_spin)
+
+    assert busy >= 0.6 * idle, f"{busy} samples with the GIL held vs {idle} idle"
+    assert worst_gap_ms < 50
 
 
 def test_drain_from_another_thread_is_safe():
