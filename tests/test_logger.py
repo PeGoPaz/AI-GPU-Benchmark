@@ -100,3 +100,41 @@ def test_report_is_written_beside_the_files_it_describes(telemetry_sample, tmp_p
     assert report["files"] == {"csv": os.path.basename(csv_path),
                                "plot": os.path.basename(png_path)}
     assert os.path.dirname(report_path) == os.path.dirname(csv_path)
+
+
+
+# --- native power trace ------------------------------------------------------------
+
+def _chunk(start, n, watts=200.0):
+    import numpy as np
+    seconds = start + np.arange(n) * 0.002
+    return seconds, np.full(n, watts, dtype=np.float32)
+
+
+def test_power_trace_shares_the_telemetry_time_axis(telemetry_sample):
+    lg = _filled(telemetry_sample)                # first row at timestamp 100.0
+    lg.log_power_trace(_chunk(100.5, 3))
+    lg.log_power_trace(_chunk(100.506, 2))
+
+    trace = lg.power_trace()
+
+    assert len(trace) == 5
+    assert trace["time_sec"].iloc[0] == 0.5
+    assert trace["time_sec"].is_monotonic_increasing
+
+
+def test_power_trace_is_only_kept_while_logging(telemetry_sample):
+    lg = _filled(telemetry_sample)
+    lg.stop()
+    lg.log_power_trace(_chunk(200.0, 10))
+
+    assert lg.power_trace() is None
+
+
+def test_new_run_starts_without_the_old_trace(telemetry_sample):
+    lg = _filled(telemetry_sample)
+    lg.log_power_trace(_chunk(100.0, 10))
+    lg.stop()
+    lg.start()
+
+    assert lg.power_trace() is None

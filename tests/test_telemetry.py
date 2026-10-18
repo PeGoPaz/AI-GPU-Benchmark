@@ -142,13 +142,19 @@ def _patch_nvml(monkeypatch, **overrides):
     defaults.update(overrides)
     for name, fn in defaults.items():
         monkeypatch.setattr(pynvml, name, fn)
+    # Deterministic whether or not the native module is installed here.
+    monkeypatch.setattr(telemetry, "open_sampler", lambda: (None, "not built (test)"))
 
 
-def _one_poll(worker, device=None):
+def _one_poll(worker, device=None, traces=None, status=None):
     """Runs the worker's loop for exactly one snapshot."""
     snapshots, errors = [], []
     worker.device_info_ready = mock.Mock(
         emit=(device.append if device is not None else lambda *_: None))
+    worker.power_trace = mock.Mock(
+        emit=(traces.append if traces is not None else lambda *_: None))
+    worker.sampler_status = mock.Mock(
+        emit=(status.append if status is not None else lambda *_: None))
 
     def capture(sample):
         snapshots.append(sample)
@@ -292,3 +298,75 @@ def test_device_info_tolerates_missing_queries(monkeypatch):
 
     assert device[0]["driver_version"] is None
     assert device[0]["power_limit_w"] is None
+
+
+
+# --- native power sampler ----------------------------------------------------------
+
+class FakeSampler:
+    """Stands in for nvml_sampler.PowerSampler: one canned batch per drain."""
+
+    description = "instant power (test)"
+    interval_us = 2000
+
+    def __init__(self, watts=(180.0, 260.0, 210.0)):
+        import numpy as np
+        self.batch = (np.array([100.000, 100.002, 100.004]),
+                      np.array(watts, dtype=np.float32))
+        self.started = self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def drain(self):
+        return self.batch
+
+
+def test_native_peak_and_trace_ride_along_with_the_poll(monkeypatch):
+    _patch_nvml(monkeypatch)
+    sampler = FakeSampler()
+    monkeypatch.setattr(telemetry, "open_sampler", lambda: (sampler, sampler.description))
+    traces, status = [], []
+
+    snapshots, errors = _one_poll(telemetry.TelemetryWorker(interval_ms=1),
+                                  traces=traces, status=status)
+
+    assert not errors
+    assert snapshots[0]["power_peak_w"] == 260.0
+    assert len(traces) == 1 and list(traces[0][1]) == [180.0, 260.0, 210.0]
+    assert status[0]["active"] is True
+    assert status[0]["detail"] == "instant power (test)"
+    assert status[0]["interval_us"] == 2000
+    assert sampler.started and sampler.stopped
+
+
+def test_without_the_module_telemetry_is_unchanged(monkeypatch):
+    _patch_nvml(monkeypatch)
+    traces, status = [], []
+
+    snapshots, errors = _one_poll(telemetry.TelemetryWorker(interval_ms=1),
+                                  traces=traces, status=status)
+
+    assert not errors
+    assert snapshots[0]["power_peak_w"] is None
+    assert snapshots[0]["power_w"] == 320.0
+    assert traces == []
+    assert status[0] == {"active": False, "detail": "not built (test)"}
+
+
+def test_sampler_that_fails_to_start_degrades_to_polling(monkeypatch):
+    _patch_nvml(monkeypatch)
+    sampler = FakeSampler()
+    sampler.start = mock.Mock(side_effect=RuntimeError("thread creation failed"))
+    monkeypatch.setattr(telemetry, "open_sampler", lambda: (sampler, sampler.description))
+    status = []
+
+    snapshots, errors = _one_poll(telemetry.TelemetryWorker(interval_ms=1), status=status)
+
+    assert not errors
+    assert snapshots[0]["power_peak_w"] is None
+    assert status[0]["active"] is False
+    assert "failed to start" in status[0]["detail"]

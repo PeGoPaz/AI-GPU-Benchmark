@@ -3,6 +3,8 @@ import time
 import pynvml
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from app.core.power_sampler import describe_status, open_sampler
+
 # nvmlDeviceGetTemperature takes sensor 0 (GPU core) and, since NVML 13,
 # sensor 1 (NVML_TEMPERATURE_GPU_MAX). The junction/hotspot sensor is NOT
 # reachable through the public NVML API on any driver — tools that display it
@@ -180,6 +182,11 @@ class TelemetryWorker(QThread):
     gpu_name_ready = pyqtSignal(str)
     device_info_ready = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
+    # (unix seconds, watts) numpy arrays from the native sampler, once per
+    # poll; never emitted when the module is not built.
+    power_trace = pyqtSignal(object)
+    # Once, after NVML is up: whether native sampling is active, and why not.
+    sampler_status = pyqtSignal(dict)
 
     def __init__(self, interval_ms: int = 250, parent=None):
         super().__init__(parent)
@@ -206,6 +213,16 @@ class TelemetryWorker(QThread):
         num_fans = _try_read(pynvml.nvmlDeviceGetNumFans, handle)
         pcie_gen_max = _try_read(pynvml.nvmlDeviceGetMaxPcieLinkGeneration, handle)
         pcie_width_max = _try_read(pynvml.nvmlDeviceGetMaxPcieLinkWidth, handle)
+
+        # The native sampler opens its own NVML reference (init is counted),
+        # so it can come and go without disturbing this loop.
+        sampler, detail = open_sampler()
+        if sampler is not None:
+            try:
+                sampler.start()
+            except Exception as e:
+                sampler, detail = None, f"native sampler failed to start: {e}"
+        self.sampler_status.emit(describe_status(sampler, detail))
 
         while self._is_running:
             try:
@@ -256,6 +273,13 @@ class TelemetryWorker(QThread):
                 #    its temperature limit; this does.
                 throttle = read_throttle_reasons(handle)
 
+                # 10. Everything the native sampler read since the last poll.
+                #     The peak goes into the row; the trace itself travels
+                #     separately, at its own rate.
+                trace = sampler.drain() if sampler is not None else None
+                power_peak = (float(trace[1].max())
+                              if trace is not None and len(trace[1]) else None)
+
                 # Package stats into a telemetry snapshot
                 telemetry = {
                     "timestamp": time.time(),
@@ -275,10 +299,13 @@ class TelemetryWorker(QThread):
                     "pcie_width_max": pcie_width_max,
                     "energy_mj": energy_mj,          # None before Volta
                     "throttle_reasons": throttle,    # bitmask, None if unknown
+                    "power_peak_w": power_peak,      # None without the native sampler
                 }
 
                 # Broadcast data to UI
                 self.data_updated.emit(telemetry)
+                if trace is not None and len(trace[0]):
+                    self.power_trace.emit(trace)
 
             except Exception as e:
                 self.error_occurred.emit(f"Telemetry Read Error: {str(e)}")
@@ -286,6 +313,8 @@ class TelemetryWorker(QThread):
             self.msleep(self.interval_ms)
 
         # Cleanup NVML when thread stops
+        if sampler is not None:
+            sampler.stop()
         try:
             pynvml.nvmlShutdown()
         except Exception:

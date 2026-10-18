@@ -173,6 +173,7 @@ class HeadlessRun(QObject):
         self.exit_code: int | None = None
         self.logger = BenchmarkLogger()
         self._device: dict | None = None
+        self._sampler_status: dict | None = None
         self._loss_steps: list[int] = []
         self._loss_values: list[float] = []
         self._rate = RateTracker()
@@ -183,6 +184,8 @@ class HeadlessRun(QObject):
         self.telemetry = telemetry_cls(interval_ms=interval_ms)
         self.telemetry.data_updated.connect(self.logger.log)
         self.telemetry.device_info_ready.connect(self._on_device_info)
+        self.telemetry.sampler_status.connect(self._on_sampler_status)
+        self.telemetry.power_trace.connect(self.logger.log_power_trace)
         self.telemetry.error_occurred.connect(self._on_telemetry_error)
         self._last_telemetry_error: str | None = None
 
@@ -221,6 +224,15 @@ class HeadlessRun(QObject):
         self._device = info
         self._print(f"GPU: {info.get('name')}, driver {info.get('driver_version') or '?'}, "
                     f"CUDA {info.get('cuda_driver_version') or '?'}")
+
+    @pyqtSlot(dict)
+    def _on_sampler_status(self, status: dict) -> None:
+        self._sampler_status = status
+        if status["active"]:
+            self._print(f"Power sampler: native, {status['detail']}, "
+                        f"every {status['interval_us'] / 1000:g} ms")
+        else:
+            self._print(f"Power sampler: {status['detail']}")
 
     @pyqtSlot(str)
     def _on_telemetry_error(self, message: str) -> None:

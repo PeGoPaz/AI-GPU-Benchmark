@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from app.utils.plots import build_report_figure
@@ -10,17 +11,45 @@ from app.utils.plots import build_report_figure
 class BenchmarkLogger:
     def __init__(self):
         self.data = []
+        self.trace_chunks = []
         self.is_logging = False
 
     def start(self):
         """Clears old data and starts listening for new telemetry."""
         self.data = []
+        self.trace_chunks = []
         self.is_logging = True
 
     def log(self, telemetry_data: dict):
         """Appends a row of data if a benchmark is currently running."""
         if self.is_logging:
             self.data.append(telemetry_data)
+
+    def log_power_trace(self, chunk) -> None:
+        """Keeps a (seconds, watts) batch from the native sampler while logging.
+
+        Stored as the arrays it arrived in and only joined on request: at
+        500 Hz a long run is hundreds of thousands of samples, too many to
+        turn into dicts one by one as they come in.
+        """
+        if self.is_logging:
+            self.trace_chunks.append(chunk)
+
+    def power_trace(self) -> pd.DataFrame | None:
+        """The high-rate power trace, on the same time axis as to_dataframe().
+
+        None when the native sampler was not running.
+        """
+        if not self.trace_chunks:
+            return None
+        seconds = np.concatenate([chunk[0] for chunk in self.trace_chunks])
+        watts = np.concatenate([chunk[1] for chunk in self.trace_chunks])
+        start = self.data[0]['timestamp'] if self.data else seconds[0]
+        return pd.DataFrame({
+            'timestamp': seconds,
+            'power_w': watts,
+            'time_sec': seconds - start,
+        })
 
     def stop(self) -> pd.DataFrame | None:
         """Stops logging and returns the collected run as a DataFrame."""

@@ -16,7 +16,10 @@ class FakeTelemetry(QObject):
     gpu_name_ready = pyqtSignal(str)
     device_info_ready = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
+    power_trace = pyqtSignal(object)
+    sampler_status = pyqtSignal(dict)
     samples: list = []
+    status = {"active": False, "detail": "native module not built"}
 
     def __init__(self, interval_ms=250, parent=None):
         super().__init__(parent)
@@ -26,6 +29,7 @@ class FakeTelemetry(QObject):
         self.device_info_ready.emit({"name": "NVIDIA GeForce RTX 4060",
                                      "driver_version": "580.82",
                                      "cuda_driver_version": "13.0"})
+        self.sampler_status.emit(self.status)
         for sample in self.samples:
             self.data_updated.emit(sample)
 
@@ -253,3 +257,18 @@ def test_main_lists_and_exits_without_a_window(monkeypatch, capsys):
 
     assert main.main() == 0
     assert "Presets:" in capsys.readouterr().out
+
+
+
+def test_sampler_status_is_printed(tmp_path, telemetry_sample):
+    _, _, out = _run(tmp_path, telemetry_sample)
+
+    assert "Power sampler: native module not built" in out
+
+
+def test_active_sampler_is_described_with_its_rate(tmp_path, telemetry_sample, monkeypatch):
+    monkeypatch.setattr(FakeTelemetry, "status",
+                        {"active": True, "detail": "instant power", "interval_us": 2000})
+    _, _, out = _run(tmp_path, telemetry_sample)
+
+    assert "Power sampler: native, instant power, every 2 ms" in out

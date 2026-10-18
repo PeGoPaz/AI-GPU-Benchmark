@@ -296,11 +296,14 @@ class MainWindow(QMainWindow):
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
         self.telemetry.device_info_ready.connect(self._on_device_info)
+        self.telemetry.sampler_status.connect(self._on_sampler_status)
+        self.telemetry.power_trace.connect(self._on_power_trace)
         self.telemetry.error_occurred.connect(self._on_telemetry_error)
         self.telemetry.start()
 
         self.trainer = None
         self._device_info = None
+        self._sampler_status = None
         self._last_summary = None
 
         # Live charts: redrawn from what the logger has collected so far.
@@ -328,6 +331,19 @@ class MainWindow(QMainWindow):
         if info.get("driver_version"):
             self.log_to_console(
                 f"Driver {info['driver_version']}, CUDA {info.get('cuda_driver_version') or '?'}")
+
+    @pyqtSlot(dict)
+    def _on_sampler_status(self, status: dict):
+        self._sampler_status = status
+        if status["active"]:
+            self.log_to_console(f"Power sampler: native, {status['detail']}, "
+                                f"every {status['interval_us'] / 1000:g} ms")
+        else:
+            self.log_to_console(f"Power sampler: {status['detail']}")
+
+    @pyqtSlot(object)
+    def _on_power_trace(self, chunk):
+        self.logger.log_power_trace(chunk)
 
     @pyqtSlot(str)
     def _on_telemetry_error(self, message: str):
@@ -363,7 +379,7 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_headroom.setText("Thermal Headroom: N/A")
 
-        self.lbl_power.setText(f"Power: {data['power_w']} W")
+        self.lbl_power.setText(self._format_power(data))
         self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
         self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
         self.lbl_fan.setText(self._format_fan(data))
@@ -383,6 +399,15 @@ class MainWindow(QMainWindow):
             self.lbl_throttle.setProperty("warning", throttled)
             self.lbl_throttle.style().unpolish(self.lbl_throttle)
             self.lbl_throttle.style().polish(self.lbl_throttle)
+
+    @staticmethod
+    def _format_power(data: dict) -> str:
+        # The poll's reading is smoothed; the peak, when the native sampler
+        # supplies it, is the highest instant reading since the last poll.
+        peak = data.get('power_peak_w')
+        if peak is None:
+            return f"Power: {data['power_w']} W"
+        return f"Power: {data['power_w']} W (peak {peak:.0f} W)"
 
     @staticmethod
     def _format_fan(data: dict) -> str:

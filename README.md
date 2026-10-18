@@ -135,6 +135,7 @@ app/
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window
+    power_sampler.py           — opens the native sampler when it is built, explains why not when it is not
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion
   utils/
     logger.py                  — BenchmarkLogger: collects telemetry in memory, returns a DataFrame, exports CSV + PNG
@@ -186,7 +187,7 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 pip install ./native
 ```
 
-That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
+That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML reachable, the telemetry thread starts it alongside its own polling, drains it on every 250 ms poll, and the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`. The window and the headless run both say in one line at start-up whether native sampling is active, and if not, why: module not built, no driver, or a card without a power reading. In every one of those cases telemetry carries on exactly as before. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
 
 ---
 

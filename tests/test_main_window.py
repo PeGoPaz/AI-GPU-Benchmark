@@ -736,3 +736,33 @@ def test_failed_run_exports_telemetry_without_a_report(started_run, telemetry_sa
 
     written = sorted(p.suffix for p in (tmp_path / "logs").iterdir())
     assert written == [".csv", ".png"]
+
+
+
+# --- native power sampler -----------------------------------------------------------
+
+def test_power_label_shows_the_native_peak(window, telemetry_sample):
+    window.update_telemetry_ui(telemetry_sample(0, power_w=180.0, power_peak_w=262.4))
+    assert window.lbl_power.text() == "Power: 180.0 W (peak 262 W)"
+
+    window.update_telemetry_ui(telemetry_sample(1, power_w=180.0, power_peak_w=None))
+    assert window.lbl_power.text() == "Power: 180.0 W"
+
+
+def test_sampler_status_is_logged(window):
+    window._on_sampler_status({"active": True, "detail": "instant power", "interval_us": 2000})
+    window._on_sampler_status({"active": False, "detail": "native module not built"})
+
+    text = window.console.toPlainText()
+    assert "Power sampler: native, instant power, every 2 ms" in text
+    assert "Power sampler: native module not built" in text
+
+
+def test_power_trace_is_collected_during_a_run(started_run, telemetry_sample):
+    import numpy as np
+
+    started_run.update_telemetry_ui(telemetry_sample(0))
+    started_run._on_power_trace((np.array([100.1, 100.102]),
+                                 np.array([200.0, 300.0], dtype=np.float32)))
+
+    assert len(started_run.logger.power_trace()) == 2
