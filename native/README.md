@@ -16,6 +16,21 @@ The module neither links against `libnvidia-ml` nor includes `nvml.h`; it opens 
 
 The tests build a fake `libnvidia-ml` (`tests/fake_nvml.cpp`) and load it by path through the same code, covering a missing library, a failed `nvmlInit`, a missing entry point and the actual readings, all without a GPU.
 
+## From Python
+
+```python
+import nvml_sampler
+
+ok, detail = nvml_sampler.available()          # (False, "could not load NVML: ...") without a driver
+
+with nvml_sampler.PowerSampler(device_index=0, interval_us=2000) as sampler:
+    ...                                        # sampling on a native thread
+    seconds, watts = sampler.drain()           # numpy float64 unix time, float32 watts
+print(sampler.stats())                         # reads, errors, dropped, changes, worst_gap_ms
+```
+
+`stop()` and `drain()` release the GIL while they wait or copy, and `drain()` is serialised on the Python side, so it is safe to call from any thread. `nvml_sampler._testing.scripted_sampler(readings_mw, interval_us)` gives the same object driven by a fixed script instead of NVML, which is what `tests/test_native_sampler.py` uses.
+
 ## How the sampler works
 
 `power::Sampler` owns one thread that reads a `PowerSource` at a fixed cadence (2 ms by default) and pushes `(unix_ns, milliwatts)` into the ring buffer below; Python drains it once per telemetry poll.
