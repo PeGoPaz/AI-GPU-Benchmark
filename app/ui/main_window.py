@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.core.metrics import compute_stats
 from app.core.telemetry import TelemetryWorker
 from app.core.trainer import (
     DEFAULT_PRESET,
@@ -453,6 +454,9 @@ class MainWindow(QMainWindow):
         else:
             self.log_to_console(f"\nBenchmark Complete! Time: {summary['elapsed_time_sec']}s")
         self.log_to_console(f"Throughput: {summary['steps_per_sec']} steps/sec")
+        if summary.get('tokens_per_step') and summary['steps_per_sec']:
+            self.log_to_console(
+                f"           {summary['steps_per_sec'] * summary['tokens_per_step']:,.0f} tokens/sec")
         self._set_idle_controls()
         self.btn_export.setEnabled(True)
 
@@ -497,15 +501,7 @@ class MainWindow(QMainWindow):
 
     def _render_summary(self, df, summary: dict):
         """Populates the summary table with computed benchmark metrics."""
-        avg_temp = df['temp_gpu'].mean()
-        max_temp = df['temp_gpu'].max()
-        avg_power = df['power_w'].mean()
-        peak_power = df['power_w'].max()
-        avg_vram = df['vram_used_mb'].mean()
-        peak_vram = df['vram_used_mb'].max()
-
-        steps_per_sec = summary['steps_per_sec']
-        efficiency = steps_per_sec / avg_power if avg_power > 0 else 0
+        stats = compute_stats(df, summary)
 
         steps_label = f"{summary['total_steps']}"
         if summary.get('aborted'):
@@ -524,34 +520,40 @@ class MainWindow(QMainWindow):
             ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
-            ("Steps/sec", f"{steps_per_sec:.2f}"),
-            ("Efficiency (steps/sec/W)", f"{efficiency:.4f}"),
-            ("Avg Temp (°C)", f"{avg_temp:.1f}"),
-            ("Max Temp (°C)", f"{max_temp}"),
-            ("Avg Power (W)", f"{avg_power:.1f}"),
-            ("Peak Power (W)", f"{peak_power:.1f}"),
-            ("Avg VRAM (MiB)", f"{avg_vram:.1f}"),
-            ("Peak VRAM (MiB)", f"{peak_vram:.1f}"),
+            ("Steps/sec", f"{summary['steps_per_sec']:.2f}"),
         ]
 
-        # Memory temperature is only present on GPUs that expose the field.
-        if 'temp_memory' in df.columns and df['temp_memory'].notna().any():
-            metrics.append(("Max Mem Temp (°C)", f"{df['temp_memory'].max():.0f}"))
-        if 'temp_headroom_c' in df.columns and df['temp_headroom_c'].notna().any():
-            metrics.append(
-                ("Min Thermal Headroom (°C)", f"{df['temp_headroom_c'].min():.0f}")
-            )
+        # Throughput and energy need the timed window, which a run stopped
+        # during warm-up never opened.
+        if stats['tokens_per_sec'] is not None:
+            metrics.append(("Tokens/sec", f"{stats['tokens_per_sec']:,.0f}"))
+        if stats['est_tflops'] is not None:
+            metrics.append(("Compute (est. TFLOPS)", f"{stats['est_tflops']:.1f}"))
+        if stats['energy_j'] is not None:
+            metrics.append((f"Energy, timed (kJ, {stats['energy_source']})",
+                            f"{stats['energy_j'] / 1000:.2f}"))
+            metrics.append(("Efficiency (tokens/J)", f"{stats['tokens_per_joule']:.1f}"))
 
-        # Cooling and interconnect: absent on passively cooled cards.
-        if 'fan_speed_pct' in df.columns and df['fan_speed_pct'].notna().any():
-            metrics.append(("Peak Fan (%)", f"{df['fan_speed_pct'].max():.0f}"))
-        if ('pcie_gen' in df.columns and df['pcie_gen'].notna().any()
-                and df['pcie_width'].notna().any()):
-            # The link under load is the interesting one; at idle it downshifts.
-            metrics.append(
-                ("PCIe Link (peak)",
-                 f"Gen{df['pcie_gen'].max():.0f} x{df['pcie_width'].max():.0f}")
-            )
+        metrics += [
+            ("Avg Temp (°C)", f"{stats['avg_temp_c']:.1f}"),
+            ("Max Temp (°C)", f"{stats['max_temp_c']:.0f}"),
+            ("Avg Power (W)", f"{stats['avg_power_w']:.1f}"),
+            ("Peak Power (W)", f"{stats['peak_power_w']:.1f}"),
+            ("Avg VRAM (MiB)", f"{stats['avg_vram_mb']:.1f}"),
+            ("Peak VRAM (MiB)", f"{stats['peak_vram_mb']:.1f}"),
+        ]
+
+        # Optional hardware: memory temperature needs a GPU exposing the
+        # field, and fan and PCIe readings are absent on passive cards.
+        if stats['max_mem_temp_c'] is not None:
+            metrics.append(("Max Mem Temp (°C)", f"{stats['max_mem_temp_c']:.0f}"))
+        if stats['min_headroom_c'] is not None:
+            metrics.append(("Min Thermal Headroom (°C)", f"{stats['min_headroom_c']:.0f}"))
+        if stats['peak_fan_pct'] is not None:
+            metrics.append(("Peak Fan (%)", f"{stats['peak_fan_pct']:.0f}"))
+        if stats['pcie_gen_peak'] is not None and stats['pcie_width_peak'] is not None:
+            metrics.append(("PCIe Link (peak)",
+                            f"Gen{stats['pcie_gen_peak']:.0f} x{stats['pcie_width_peak']:.0f}"))
 
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):

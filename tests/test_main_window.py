@@ -465,3 +465,24 @@ def test_preset_reaches_the_trainer(window, monkeypatch, telemetry_sample):
     assert (kwargs["steps"], kwargs["batch_size"], kwargs["seq_len"]) == (250, 1, 512)
     assert kwargs["gradient_checkpointing"] is True
     assert "WARNING" not in window.console.toPlainText()
+
+
+
+def test_summary_reports_tokens_compute_and_energy(window, telemetry_sample):
+    window.logger.start()
+    for i in range(9):
+        window.logger.log(telemetry_sample(i))
+
+    window.on_benchmark_finished({
+        "total_steps": 100, "requested_steps": 100, "aborted": False,
+        "elapsed_time_sec": 20.0, "steps_per_sec": 5.0,
+        "tokens_per_step": 4096, "params_b": 1.5, "gradient_checkpointing": True,
+        "measure_start": 102.0, "measure_end": 106.0,
+    })
+
+    rows = _summary_rows(window)
+    assert rows["Tokens/sec"] == "20,480"
+    assert rows["Compute (est. TFLOPS)"] == "184.3"
+    assert rows["Energy, timed (kJ, counter)"] == "1.00"     # 4 s × 250 J/s
+    assert rows["Efficiency (tokens/J)"] == "409.6"
+    assert "20,480 tokens/sec" in window.console.toPlainText()

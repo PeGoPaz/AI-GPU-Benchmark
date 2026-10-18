@@ -134,6 +134,7 @@ def _patch_nvml(monkeypatch, **overrides):
         "nvmlDeviceGetFanSpeedRPM": lambda h: 1900,
         "nvmlDeviceGetCurrPcieLinkGeneration": lambda h: 4,
         "nvmlDeviceGetCurrPcieLinkWidth": lambda h: 16,
+        "nvmlDeviceGetTotalEnergyConsumption": lambda h: 123_456_789,
     }
     defaults.update(overrides)
     for name, fn in defaults.items():
@@ -185,3 +186,21 @@ def test_passive_card_still_reports_core_telemetry(monkeypatch):
     assert snap["fan_rpm"] is None
     assert snap["temp_gpu"] == 72
     assert snap["power_w"] == 320.0
+
+
+def test_snapshot_carries_the_energy_counter(monkeypatch):
+    _patch_nvml(monkeypatch)
+    snapshots, _ = _one_poll(telemetry.TelemetryWorker(interval_ms=1))
+
+    assert snapshots[0]["energy_mj"] == 123_456_789
+
+
+def test_pre_volta_card_has_no_energy_counter(monkeypatch):
+    def unsupported(*_a, **_k):
+        raise Exception("NVML_ERROR_NOT_SUPPORTED")
+
+    _patch_nvml(monkeypatch, nvmlDeviceGetTotalEnergyConsumption=unsupported)
+    snapshots, errors = _one_poll(telemetry.TelemetryWorker(interval_ms=1))
+
+    assert not errors
+    assert snapshots[0]["energy_mj"] is None

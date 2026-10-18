@@ -163,6 +163,11 @@ class TelemetryWorker(QThread):
                 fan_rpm = _try_read(pynvml.nvmlDeviceGetFanSpeedRPM, handle)
                 pcie_gen, pcie_width = read_pcie_link(handle)
 
+                # 8. Cumulative energy (mJ since the driver loaded), Volta and
+                #    newer. Integrated by the card itself, so unlike sampled
+                #    power it misses no spike between two polls.
+                energy_mj = _try_read(pynvml.nvmlDeviceGetTotalEnergyConsumption, handle)
+
                 # Package stats into a telemetry snapshot
                 telemetry = {
                     "timestamp": time.time(),
@@ -180,6 +185,7 @@ class TelemetryWorker(QThread):
                     "pcie_width": pcie_width,
                     "pcie_gen_max": pcie_gen_max,
                     "pcie_width_max": pcie_width_max,
+                    "energy_mj": energy_mj,          # None before Volta
                 }
 
                 # Broadcast data to UI

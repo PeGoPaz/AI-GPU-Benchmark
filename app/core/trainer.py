@@ -199,6 +199,10 @@ SEQ_LENGTHS = (128, 256, 512, 1024, 2048)
 
 DEFAULT_SEQ_LEN = SEQ_LENGTHS[0]
 
+# Micro-batches per optimizer step. Every step therefore trains on
+# batch_size × GRADIENT_ACCUMULATION_STEPS × seq_len tokens.
+GRADIENT_ACCUMULATION_STEPS = 4
+
 
 def pack_tokens(sequences: list[list[int]], seq_len: int,
                 separator: int | None = None) -> list[list[int]]:
@@ -364,7 +368,7 @@ class TrainerWorker(QThread):
             training_args = TrainingArguments(
                 output_dir="./results",
                 per_device_train_batch_size=self.batch_size,
-                gradient_accumulation_steps=4, # Simulates a batch size of 16 (4x4)
+                gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
                 max_steps=self.warmup_steps + self.steps,
                 logging_steps=1,
                 learning_rate=2e-4,
@@ -402,11 +406,13 @@ class TrainerWorker(QThread):
             # loop exits early, so dividing the requested count by the (short)
             # elapsed time would massively overstate throughput; and a run
             # halted during warm-up never opened the window at all.
+            measure_end = None
             if self.measure_start is None:
                 elapsed_time = 0.0
                 steps_done = 0
             else:
-                elapsed_time = time.time() - self.measure_start
+                measure_end = time.time()
+                elapsed_time = measure_end - self.measure_start
                 steps_done = max(0, self.completed_steps - self.warmup_steps)
             was_aborted = steps_done < self.steps
 
@@ -418,12 +424,19 @@ class TrainerWorker(QThread):
                 "precision": self.precision.label,
                 "seq_len": self.seq_len,
                 "gradient_checkpointing": self.gradient_checkpointing,
+                "params_b": self.model_spec.params_b,
+                "tokens_per_step": (self.batch_size * GRADIENT_ACCUMULATION_STEPS
+                                    * self.seq_len),
                 "warmup_steps": self.warmup_steps,
                 "total_steps": steps_done,
                 "requested_steps": self.steps,
                 "aborted": was_aborted,
                 "elapsed_time_sec": round(elapsed_time, 2),
                 "steps_per_sec": round(steps_done / elapsed_time, 2) if elapsed_time > 0 else 0.0,
+                # Wall-clock bounds of the timed window, so telemetry can be
+                # cut to exactly the measured steps (energy per token).
+                "measure_start": self.measure_start,
+                "measure_end": measure_end,
             }
 
             if was_aborted:

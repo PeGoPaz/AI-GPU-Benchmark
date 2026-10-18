@@ -539,3 +539,29 @@ def test_default_preset_is_heavier_than_the_old_hardcoded_run():
     assert preset.label == "Standard"
     assert preset.model.params_b > 1.1
     assert preset.seq_len > 128
+
+
+# --- throughput inputs --------------------------------------------------------
+
+def test_summary_carries_what_tokens_and_flops_need():
+    summary = run_worker(batch_size=2, seq_len=512,
+                         model=trainer_module.MODELS[1])["summary"]
+
+    assert summary["tokens_per_step"] == 2 * trainer_module.GRADIENT_ACCUMULATION_STEPS * 512
+    assert summary["params_b"] == trainer_module.MODELS[1].params_b
+
+
+def test_summary_bounds_the_timed_window():
+    summary = run_worker(steps=100, warmup_steps=10,
+                         warmup_elapsed=30.0, elapsed=20.0)["summary"]
+
+    assert summary["measure_start"] == 30.0
+    assert summary["measure_end"] == 50.0
+    assert summary["measure_end"] - summary["measure_start"] == summary["elapsed_time_sec"]
+
+
+def test_window_stays_unbounded_when_warmup_never_finished():
+    summary = run_worker(steps=100, warmup_steps=10, stop_after=4)["summary"]
+
+    assert summary["measure_start"] is None
+    assert summary["measure_end"] is None
