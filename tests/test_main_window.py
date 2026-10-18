@@ -56,15 +56,24 @@ def qapp():
     return app
 
 
+def _scratch_settings(tmp_path):
+    from PyQt6.QtCore import QSettings
+    return QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+
 @pytest.fixture
-def window(qapp, monkeypatch):
-    """A MainWindow whose telemetry thread never finds a GPU."""
+def window(qapp, monkeypatch, tmp_path):
+    """A MainWindow whose telemetry thread never finds a GPU.
+
+    Settings go to a scratch file: the real ones would leak state between
+    tests and overwrite the preferences of whoever runs the suite.
+    """
     import pynvml
     monkeypatch.setattr(pynvml, "nvmlInit",
                         lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
 
     from app.ui.main_window import MainWindow
-    win = MainWindow()
+    win = MainWindow(settings=_scratch_settings(tmp_path))
     yield win
     win.telemetry.stop()
     win.close()
@@ -578,3 +587,105 @@ def test_progress_updates_the_eta_line(started_run):
 
     assert started_run.progress_bar.maximum() == 310
     assert started_run.lbl_progress.text() == "Step 1 / 310"
+
+
+
+# --- theme & persisted settings ------------------------------------------------
+
+def _reopen(window, tmp_path):
+    """Closes the window and opens a fresh one on the same settings file."""
+    from app.ui.main_window import MainWindow
+
+    window.close()
+    reopened = MainWindow(settings=_scratch_settings(tmp_path))
+    reopened.telemetry.stop()
+    return reopened
+
+
+def test_dark_theme_recolours_window_and_charts(window, telemetry_sample):
+    from PyQt6.QtGui import QPalette
+
+    from app.ui.style import DARK
+
+    _finish_run(window, telemetry_sample)
+    window.act_dark.setChecked(True)
+
+    window_color = QApplication.instance().palette().color(QPalette.ColorRole.Window)
+    assert window_color.name().upper() == DARK.window
+    assert window.thermal_canvas.figure.get_facecolor()[:3] == pytest.approx(
+        (0x23 / 255, 0x23 / 255, 0x23 / 255))
+
+    window.act_dark.setChecked(False)
+    assert window.thermal_canvas.figure.get_facecolor()[:3] == pytest.approx((1, 1, 1))
+
+
+def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
+    """Temperature, power and clock axes are coloured to match their curves;
+    the theme must only change the labels left at matplotlib's default."""
+    from app.utils.plots import CLOCK_COLOR
+
+    _finish_run(window, telemetry_sample)
+    window.act_dark.setChecked(True)
+
+    percent_axes, clock_axes = window.util_canvas.figure.axes
+    assert clock_axes.yaxis.label.get_color() == CLOCK_COLOR
+    assert percent_axes.yaxis.label.get_color() == "#DDDDDD"
+
+
+def test_theme_is_remembered(window, tmp_path):
+    window.act_dark.setChecked(True)
+
+    reopened = _reopen(window, tmp_path)
+
+    assert reopened.act_dark.isChecked()
+    assert reopened._theme.name == "dark"
+    reopened.act_dark.setChecked(False)              # leave the app palette light
+
+
+def test_workload_is_remembered(window, tmp_path, monkeypatch):
+    import app.ui.main_window as mw
+    monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
+    _select(window.cmb_preset, "Extended")
+    window.spin_warmup.setValue(25)
+    window.start_benchmark()
+
+    reopened = _reopen(window, tmp_path)
+
+    assert reopened.cmb_preset.currentText() == "Extended"
+    assert reopened.cmb_model.currentText() == "Qwen2.5 3B"
+    assert reopened.spin_warmup.value() == 25
+
+
+def test_custom_workload_is_remembered_field_by_field(window, tmp_path):
+    _select(window.cmb_preset, "Quick")
+    window.spin_steps.setValue(420)
+    window.cmb_seq_len.setCurrentIndex(window.cmb_seq_len.findData(256))
+
+    reopened = _reopen(window, tmp_path)
+
+    assert reopened.cmb_preset.currentText() == "Custom"
+    assert reopened.cmb_model.currentText() == "TinyLlama 1.1B"
+    assert reopened.spin_steps.value() == 420
+    assert reopened.cmb_seq_len.currentData() == 256
+
+
+def test_stale_settings_fall_back_to_the_default(tmp_path, qapp, monkeypatch):
+    """A model removed from the registry, or a hand-edited file, must not
+    stop the app from starting."""
+    import pynvml
+
+    from app.ui.main_window import MainWindow
+    monkeypatch.setattr(pynvml, "nvmlInit",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
+    settings = _scratch_settings(tmp_path)
+    settings.setValue("workload/preset", "Custom")
+    settings.setValue("workload/model", "GPT-5 Turbo")
+    settings.setValue("workload/steps", "not a number")
+    settings.sync()
+
+    win = MainWindow(settings=_scratch_settings(tmp_path))
+    win.telemetry.stop()
+
+    assert win.cmb_model.currentText() == "Qwen2.5 1.5B"
+    assert win.spin_steps.value() == 300
+    win.close()

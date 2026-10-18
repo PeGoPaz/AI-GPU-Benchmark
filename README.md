@@ -53,6 +53,8 @@ The GUI window opens with:
 - A "Stop" button that ends the run at the next step boundary without freezing the window
 - Three tabbed graphs — **Thermal & Power**, **Utilization, Clock & Fan** and **Loss** — that are visible from the moment a run starts and redraw once a second as data arrives, then a **Benchmark Summary** table on completion. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
 - An "Export Results" button that writes the finished run to `logs/` as CSV + PNG
+- A **View → Dark theme** toggle covering the widgets, the stylesheet and the charts. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
+- Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
 ---
 
@@ -116,7 +118,7 @@ main.py                        — entry point, launches the PyQt6 app
 app/
   ui/
     main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
-    style.py                   — palette and the single application stylesheet
+    style.py                   — light and dark palettes, the QPalette and stylesheet built from them
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window

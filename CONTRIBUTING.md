@@ -43,7 +43,6 @@ Three blocks, roughly ordered — later ones build on earlier ones, and each is 
 
 Self-contained, a file or two each. Good first PRs.
 
-- **Dark/light toggle.** `app/ui/style.py` keeps the palette as constants and builds `STYLESHEET` from them, so a second theme is a second palette plus a menu action that re-applies the sheet. The part worth thinking about is where the choice is remembered between runs; `QSettings` is the obvious answer.
 - **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 33 gaps and `--strict` reports 64, nearly all of them a mechanical `-> None` on a Qt slot. Add them a module at a time, tightening the config as each one goes clean.
 
 ### 2. Results worth keeping

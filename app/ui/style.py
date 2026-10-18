@@ -7,9 +7,13 @@ stylesheet on every transition — start_benchmark() used to swap the Start
 button's sheet to grey and both the finish and error paths had to swap it
 back.
 
-A second theme means a second palette and rebuilding STYLESHEET from it;
-nothing in main_window.py has to change.
+A theme is a Palette. It drives three things that each need telling
+separately: the QPalette Fusion paints standard widgets with, the stylesheet
+for the custom-styled ones, and the matplotlib colours of the charts.
 """
+from dataclasses import dataclass
+
+from PyQt6.QtGui import QColor, QPalette
 
 START_GREEN = "#2E8B57"
 START_GREEN_HOVER = "#379E64"
@@ -23,15 +27,79 @@ EXPORT_BLUE = "#4682B4"
 EXPORT_BLUE_HOVER = "#5490C4"
 EXPORT_BLUE_PRESSED = "#3A6E99"
 
-DISABLED_BG = "#3C3C3C"
-DISABLED_FG = "#8A8A8A"
-
-WARNING_AMBER = "#D08A00"
-
 CONSOLE_BG = "#1E1E1E"
 CONSOLE_FG = "#00FF00"
 
-STYLESHEET = f"""
+
+@dataclass(frozen=True)
+class Palette:
+    """Every colour that differs between the light and the dark theme.
+
+    window/base/text are None for the light theme: it keeps Fusion's own
+    standard palette rather than an imitation of it.
+    """
+
+    name: str
+    disabled_bg: str
+    disabled_fg: str
+    muted: str
+    warning: str
+    chart_bg: str
+    chart_fg: str
+    chart_grid: str
+    window: str | None = None
+    base: str | None = None
+    text: str | None = None
+    highlight: str | None = None
+
+
+LIGHT = Palette(
+    name="light",
+    disabled_bg="#3C3C3C", disabled_fg="#8A8A8A",
+    muted="#6E6E6E",
+    # Darker than the dark theme's amber: #D08A00 on a near-white window
+    # falls short of readable contrast.
+    warning="#B36B00",
+    chart_bg="#FFFFFF", chart_fg="#222222", chart_grid="#B0B0B0",
+)
+
+DARK = Palette(
+    name="dark",
+    disabled_bg="#454545", disabled_fg="#9A9A9A",
+    muted="#A0A0A0",
+    warning="#E0A030",
+    chart_bg="#232323", chart_fg="#DDDDDD", chart_grid="#5A5A5A",
+    window="#2B2B2B", base="#1F1F1F", text="#E6E6E6", highlight="#3A6E99",
+)
+
+THEMES = {theme.name: theme for theme in (LIGHT, DARK)}
+
+
+def build_qpalette(theme: Palette, standard: QPalette) -> QPalette:
+    """The QPalette for a theme; the light one is Fusion's standard palette."""
+    if theme.window is None:
+        return QPalette(standard)
+
+    window, base, text = QColor(theme.window), QColor(theme.base), QColor(theme.text)
+    palette = QPalette(standard)
+    role = QPalette.ColorRole
+    for r, color in ((role.Window, window), (role.Button, window),
+                     (role.Base, base), (role.AlternateBase, window),
+                     (role.ToolTipBase, base),
+                     (role.WindowText, text), (role.Text, text),
+                     (role.ButtonText, text), (role.ToolTipText, text),
+                     (role.Highlight, QColor(theme.highlight)),
+                     (role.HighlightedText, QColor("#FFFFFF"))):
+        palette.setColor(r, color)
+
+    muted = QColor(theme.disabled_fg)
+    for r in (role.WindowText, role.Text, role.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, r, muted)
+    return palette
+
+
+def build_stylesheet(theme: Palette) -> str:
+    return f"""
 QLabel[role="metric"] {{
     font-size: 14px;
     font-weight: bold;
@@ -70,20 +138,20 @@ QPushButton#btnExport:pressed {{ background-color: {EXPORT_BLUE_PRESSED}; }}
 QPushButton#btnStart:disabled,
 QPushButton#btnStop:disabled,
 QPushButton#btnExport:disabled {{
-    background-color: {DISABLED_BG};
-    color: {DISABLED_FG};
+    background-color: {theme.disabled_bg};
+    color: {theme.disabled_fg};
 }}
 
 QLabel[role="metric"][warning="true"] {{
-    color: {WARNING_AMBER};
+    color: {theme.warning};
 }}
 
 QLabel#fitHint, QLabel#progressInfo {{
-    color: {DISABLED_FG};
+    color: {theme.muted};
 }}
 
 QLabel#fitHint[warning="true"] {{
-    color: {WARNING_AMBER};
+    color: {theme.warning};
     font-weight: bold;
 }}
 
@@ -93,3 +161,6 @@ QTextEdit#console {{
     font-family: monospace;
 }}
 """
+
+
+STYLESHEET = build_stylesheet(LIGHT)

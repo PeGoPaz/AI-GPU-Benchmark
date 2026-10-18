@@ -2,8 +2,10 @@ import time
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6.QtCore import QSettings, Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -36,9 +38,16 @@ from app.core.trainer import (
     estimate_weights_gib,
     fits_in_vram,
 )
-from app.ui.style import STYLESHEET
+from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
 from app.utils.logger import BenchmarkLogger
-from app.utils.plots import draw_loss, draw_thermal_power, draw_utilization
+from app.utils.plots import (
+    apply_chart_theme,
+    draw_loss,
+    draw_thermal_power,
+    draw_utilization,
+)
+
+SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 
 # How often the charts are redrawn while a run is in progress. Telemetry
 # arrives four times a second; redrawing that often would cost the UI thread
@@ -59,8 +68,12 @@ def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
+        # Injectable so tests write to a scratch file instead of the user's
+        # real preferences.
+        self.settings = settings if settings is not None else QSettings(
+            SETTINGS_ORG, SETTINGS_APP)
         self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
         self.resize(800, 650)
 
@@ -262,8 +275,16 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(left_panel, 1)
         main_layout.addLayout(right_panel, 2)
 
+        # Menu: the theme is a preference, not a benchmark setting.
+        view_menu = self.menuBar().addMenu("&View")
+        self.act_dark = QAction("&Dark theme", self)
+        self.act_dark.setCheckable(True)
+        self.act_dark.toggled.connect(self._on_dark_toggled)
+        view_menu.addAction(self.act_dark)
+
         # Applied last, so every widget above is polished in one pass.
-        self.setStyleSheet(STYLESHEET)
+        self._theme = LIGHT
+        self._apply_theme(LIGHT)
 
         self._vram_total_mib = None          # MiB, from the first snapshot
         self.cmb_model.currentIndexChanged.connect(self._update_fit_hint)
@@ -278,7 +299,7 @@ class MainWindow(QMainWindow):
                        self.cmb_seq_len.currentIndexChanged,
                        self.chk_checkpointing.toggled):
             signal.connect(self._sync_preset_combo)
-        self._apply_preset(DEFAULT_PRESET)
+        self._restore_settings()
         self._update_fit_hint()
 
         # --- INITIALIZE THREADS ---
@@ -389,6 +410,89 @@ class MainWindow(QMainWindow):
             text += f" (max Gen{gen_max} x{width_max})"
         return text
 
+    # --- theme & persisted settings --------------------------------------------
+
+    def _apply_theme(self, theme):
+        self._theme = theme
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            # App-wide rather than on the window: combo popups and tooltips
+            # are top-level windows and would not inherit it.
+            app.setPalette(build_qpalette(theme, self.style().standardPalette()))
+        self.setStyleSheet(build_stylesheet(theme))
+        for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
+            self._theme_canvas(canvas)
+
+    def _theme_canvas(self, canvas):
+        apply_chart_theme(canvas.figure, self._theme.chart_bg,
+                          self._theme.chart_fg, self._theme.chart_grid)
+        canvas.draw()
+
+    @pyqtSlot(bool)
+    def _on_dark_toggled(self, dark: bool):
+        self._apply_theme(THEMES["dark" if dark else "light"])
+        self.settings.setValue("ui/theme", self._theme.name)
+
+    def _save_settings(self):
+        """Remembers the workload, so the next launch opens on the last run."""
+        s = self.settings
+        s.setValue("ui/theme", self._theme.name)
+        s.setValue("workload/preset", self.cmb_preset.currentText())
+        s.setValue("workload/model", self.cmb_model.currentText())
+        s.setValue("workload/precision", self.cmb_precision.currentText())
+        s.setValue("workload/steps", self.spin_steps.value())
+        s.setValue("workload/batch_size", self.spin_batch.value())
+        s.setValue("workload/seq_len", self.cmb_seq_len.currentData())
+        s.setValue("workload/gradient_checkpointing", self.chk_checkpointing.isChecked())
+        s.setValue("workload/warmup_steps", self.spin_warmup.value())
+        s.sync()
+
+    def _setting_int(self, key: str, default: int) -> int:
+        """An int from the settings file, or the default if it is not one."""
+        try:
+            return self.settings.value(key, default, type=int)
+        except (TypeError, ValueError):
+            return default
+
+    def _restore_settings(self):
+        """Reapplies saved settings, skipping anything that no longer exists.
+
+        Values are matched by label, so a model dropped from the registry or a
+        hand-edited file falls back to the default instead of raising.
+        """
+        s = self.settings
+        preset_label = s.value("workload/preset", DEFAULT_PRESET.label, type=str)
+        preset = next((p for p in PRESETS if p.label == preset_label), None)
+        self._apply_preset(preset or DEFAULT_PRESET)
+
+        if preset_label == "Custom":
+            self._applying_preset = True
+            try:
+                for combo, key in ((self.cmb_model, "workload/model"),
+                                   (self.cmb_precision, "workload/precision")):
+                    index = combo.findText(s.value(key, "", type=str))
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+                seq_index = self.cmb_seq_len.findData(
+                    self._setting_int("workload/seq_len", 0))
+                if seq_index >= 0:
+                    self.cmb_seq_len.setCurrentIndex(seq_index)
+                self.spin_steps.setValue(
+                    self._setting_int("workload/steps", self.spin_steps.value()))
+                self.spin_batch.setValue(
+                    self._setting_int("workload/batch_size", self.spin_batch.value()))
+                self.chk_checkpointing.setChecked(
+                    s.value("workload/gradient_checkpointing",
+                            self.chk_checkpointing.isChecked(), type=bool))
+            finally:
+                self._applying_preset = False
+            self._sync_preset_combo()
+
+        self.spin_warmup.setValue(
+            self._setting_int("workload/warmup_steps", self.spin_warmup.value()))
+        # setChecked fires toggled, which applies the theme.
+        self.act_dark.setChecked(s.value("ui/theme", "light", type=str) == "dark")
+
     def _apply_preset(self, preset):
         """Writes a preset into the fields without bouncing back to Custom."""
         self._applying_preset = True
@@ -472,7 +576,7 @@ class MainWindow(QMainWindow):
         # heavier presets is far too long to watch a bare progress bar.
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
             canvas.figure.clear()
-            canvas.draw()
+            self._theme_canvas(canvas)
         self.plot_tabs.setVisible(True)
         self._live_timer.start()
         self.log_to_console("\n--- Starting Synthetic Workload ---")
@@ -483,6 +587,7 @@ class MainWindow(QMainWindow):
         # Locked for the duration: the summary reports these values, so they
         # must describe the run that actually happened.
         self.workload_group.setEnabled(False)
+        self._save_settings()
 
         self.trainer = TrainerWorker(
             steps=self.spin_steps.value(),
@@ -591,7 +696,7 @@ class MainWindow(QMainWindow):
             figure.clear()
             draw(figure.add_subplot(111), df)
             figure.tight_layout()
-            canvas.draw()
+            self._theme_canvas(canvas)
 
     def _draw_loss(self):
         figure = self.loss_canvas.figure
@@ -599,7 +704,7 @@ class MainWindow(QMainWindow):
         draw_loss(figure.add_subplot(111), self._loss_steps, self._loss_values,
                   self._run_warmup)
         figure.tight_layout()
-        self.loss_canvas.draw()
+        self._theme_canvas(self.loss_canvas)
 
     def _render_plots(self, df, summary: dict):
         """Final draw of all three tabs once the run is over."""
@@ -700,6 +805,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Clean up threads on exit."""
         self._live_timer.stop()
+        self._save_settings()
         self.telemetry.stop()
         if self.trainer and self.trainer.isRunning():
             # Shutdown is the one place we genuinely must block, so the
