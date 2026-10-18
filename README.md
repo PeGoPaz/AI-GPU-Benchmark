@@ -66,7 +66,7 @@ The timer does not start with the run. Warm-up steps (10 by default) are execute
 
 ### A note on hotspot (junction) temperature
 
-Earlier versions advertised a hotspot reading. NVML does not expose one: `nvmlDeviceGetTemperature` accepts a single sensor (`NVML_TEMPERATURE_COUNT == 1`, sensor 0 = GPU core), and the old code's attempts to read sensors 2 and 3 raised `NVML_ERROR_INVALID_ARGUMENT` on every poll and always yielded `N/A`. Tools that do display junction temperature read it through NvAPI or raw BAR0 MMIO, neither of which is available here.
+Earlier versions advertised a hotspot reading. NVML does not expose one: `nvmlDeviceGetTemperature` accepts sensor 0 (GPU core) and, since NVML 13, sensor 1 (`NVML_TEMPERATURE_GPU_MAX`) — nothing else — and the old code's attempts to read sensors 2 and 3 raised `NVML_ERROR_INVALID_ARGUMENT` on every poll and always yielded `N/A`. Tools that do display junction temperature read it through NvAPI or raw BAR0 MMIO, neither of which is available here.
 
 Instead the dashboard reports two values that NVML genuinely provides on Ampere and newer:
 

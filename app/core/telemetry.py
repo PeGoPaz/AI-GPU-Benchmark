@@ -3,11 +3,11 @@ import time
 import pynvml
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# NVML exposes exactly one temperature sensor via nvmlDeviceGetTemperature
-# (NVML_TEMPERATURE_COUNT == 1, sensor 0 == GPU core). The junction/hotspot
-# sensor is NOT reachable through the public NVML API on any driver — tools
-# that display it read it over NvAPI or raw BAR0 MMIO. Passing sensor index
-# 2 or 3 just raises NVML_ERROR_INVALID_ARGUMENT on every single call.
+# nvmlDeviceGetTemperature takes sensor 0 (GPU core) and, since NVML 13,
+# sensor 1 (NVML_TEMPERATURE_GPU_MAX). The junction/hotspot sensor is NOT
+# reachable through the public NVML API on any driver — tools that display it
+# read it over NvAPI or raw BAR0 MMIO. Passing sensor index 2 or 3 just raises
+# NVML_ERROR_INVALID_ARGUMENT on every single call.
 #
 # What IS available on Ampere and newer are these field values, which we use
 # as the honest substitute: memory temperature, and the thermal headroom

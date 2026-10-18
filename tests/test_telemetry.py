@@ -1,7 +1,8 @@
 """TelemetryWorker / NVML field-value decoding.
 
-Context for the odd-looking assertions: NVML exposes exactly one temperature
-sensor (NVML_TEMPERATURE_COUNT == 1, sensor 0 = GPU core). There is no public
+Context for the odd-looking assertions: nvmlDeviceGetTemperature never had the
+sensors 2 and 3 the old hotspot probe asked for (index 0 is the GPU core, and
+NVML 13 added index 1, NVML_TEMPERATURE_GPU_MAX). There is no public
 junction/hotspot sensor, so the dashboard reports memory temperature and
 thermal headroom via field values instead.
 """
@@ -16,9 +17,15 @@ MEM = telemetry._FIELD_MEMORY_TEMP
 TLIM = telemetry._FIELD_GPU_TLIMIT
 
 
-def test_nvml_exposes_single_temperature_sensor():
-    """Guards the premise of the fix: sensors 2/3 never existed."""
-    assert pynvml.NVML_TEMPERATURE_COUNT == 1
+def test_nvml_has_no_sensor_2_or_3():
+    """Guards the premise of the fix: sensors 2/3 never existed.
+
+    This used to assert NVML_TEMPERATURE_COUNT == 1, which nvidia-ml-py 13
+    broke by adding NVML_TEMPERATURE_GPU_MAX at index 1. The count was never
+    the point — the indices the hotspot probe asked for were.
+    """
+    assert pynvml.NVML_TEMPERATURE_COUNT <= 2
+    assert pynvml.NVML_TEMPERATURE_GPU == 0
 
 
 def test_dead_hotspot_probe_is_gone():
