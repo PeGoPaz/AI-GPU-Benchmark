@@ -139,10 +139,46 @@ def read_throttle_reasons(handle) -> int | None:
     return None
 
 
+def format_cuda_version(version: int | None) -> str | None:
+    """NVML's packed CUDA version (12040) as it is usually written (12.4)."""
+    if not version:
+        return None
+    return f"{version // 1000}.{(version % 1000) // 10}"
+
+
+def _decode(value):
+    """Some nvidia-ml-py versions return bytes for strings, others str."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def read_device_info(handle, gpu_name: str) -> dict:
+    """What a run report needs to say which card, driver and limits it ran on.
+
+    Read once — none of it changes while the app is open. The enforced power
+    limit is the context for the throttle reasons: a card pinned at its power
+    cap is drawing exactly this.
+    """
+    power_limit_mw = _try_read(pynvml.nvmlDeviceGetEnforcedPowerLimit, handle)
+    memory = _try_read(pynvml.nvmlDeviceGetMemoryInfo, handle)
+    return {
+        "name": gpu_name,
+        "driver_version": _decode(_try_read(pynvml.nvmlSystemGetDriverVersion)),
+        "cuda_driver_version": format_cuda_version(
+            _try_read(pynvml.nvmlSystemGetCudaDriverVersion)),
+        "vram_total_mb": round(memory.total / (1024 * 1024), 2) if memory else None,
+        "power_limit_w": power_limit_mw / 1000.0 if power_limit_mw else None,
+        "pcie_gen_max": _try_read(pynvml.nvmlDeviceGetMaxPcieLinkGeneration, handle),
+        "pcie_width_max": _try_read(pynvml.nvmlDeviceGetMaxPcieLinkWidth, handle),
+    }
+
+
 class TelemetryWorker(QThread):
     # Signals to pass hardware telemetry data back to the UI thread
     data_updated = pyqtSignal(dict)
     gpu_name_ready = pyqtSignal(str)
+    device_info_ready = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, interval_ms: int = 250, parent=None):
@@ -157,11 +193,9 @@ class TelemetryWorker(QThread):
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 
             # Emit GPU name once at startup
-            gpu_name = pynvml.nvmlDeviceGetName(handle)
-            if isinstance(gpu_name, bytes):
-                gpu_name = gpu_name.decode("utf-8", errors="replace")
-            # Some nvidia-ml-py versions return str already
+            gpu_name = _decode(pynvml.nvmlDeviceGetName(handle))
             self.gpu_name_ready.emit(gpu_name)
+            self.device_info_ready.emit(read_device_info(handle, gpu_name))
         except Exception as e:
             self.error_occurred.emit(f"NVML Initialization Failed: {str(e)}")
             return

@@ -1,4 +1,5 @@
 """BenchmarkLogger: run collection, export, and state-machine behaviour."""
+import json
 import os
 
 from app.utils.logger import BenchmarkLogger
@@ -58,8 +59,9 @@ def test_to_dataframe_is_repeatable_and_read_only(telemetry_sample):
 
 def test_export_writes_csv_and_png(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, png_path = BenchmarkLogger.export(df, output_dir=str(tmp_path))
+    csv_path, png_path, report_path = BenchmarkLogger.export(df, output_dir=str(tmp_path))
 
+    assert report_path is None                  # no report asked for
     assert os.path.getsize(csv_path) > 0
     assert os.path.getsize(png_path) > 0
     assert csv_path.endswith(".csv")
@@ -68,7 +70,7 @@ def test_export_writes_csv_and_png(telemetry_sample, tmp_path):
 
 def test_export_csv_contains_telemetry_columns(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, _ = BenchmarkLogger.export(df, output_dir=str(tmp_path))
+    csv_path, _, _ = BenchmarkLogger.export(df, output_dir=str(tmp_path))
 
     header = open(csv_path).readline()
     for column in ("temp_gpu", "temp_memory", "temp_headroom_c", "power_w", "time_sec"):
@@ -82,6 +84,19 @@ def test_exported_plot_survives_a_card_without_fans(telemetry_sample, tmp_path):
     for i in range(5):
         lg.log(telemetry_sample(i, fan_speed_pct=None, fan_rpm=None))
 
-    _, png_path = BenchmarkLogger.export(lg.stop(), output_dir=str(tmp_path))
+    _, png_path, _ = BenchmarkLogger.export(lg.stop(), output_dir=str(tmp_path))
 
     assert os.path.getsize(png_path) > 0
+
+
+
+def test_report_is_written_beside_the_files_it_describes(telemetry_sample, tmp_path):
+    df = _filled(telemetry_sample).stop()
+    csv_path, png_path, report_path = BenchmarkLogger.export(
+        df, output_dir=str(tmp_path), report={"schema_version": 1, "files": {}})
+
+    with open(report_path, encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["files"] == {"csv": os.path.basename(csv_path),
+                               "plot": os.path.basename(png_path)}
+    assert os.path.dirname(report_path) == os.path.dirname(csv_path)

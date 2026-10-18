@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 
@@ -44,10 +45,15 @@ class BenchmarkLogger:
         return df
 
     @staticmethod
-    def export(df: pd.DataFrame, output_dir: str = "logs") -> tuple[str, str]:
+    def export(df: pd.DataFrame, output_dir: str = "logs",
+               report: dict | None = None) -> tuple[str, str, str | None]:
         """Writes the collected telemetry to CSV and generates a plot PNG.
 
-        Returns (csv_path, plot_path).
+        With a report (see app.utils.report), also writes it as JSON beside
+        them, pointing at both files. A run that failed has no summary to
+        report, so its telemetry is still exportable without one.
+
+        Returns (csv_path, plot_path, report_path or None).
         """
         os.makedirs(output_dir, exist_ok=True)
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -57,7 +63,15 @@ class BenchmarkLogger:
         df.to_csv(csv_path, index=False)
         BenchmarkLogger._generate_plot(df, plot_path)
 
-        return csv_path, plot_path
+        report_path = None
+        if report is not None:
+            report_path = os.path.join(output_dir, f"report_{timestamp_str}.json")
+            report = {**report, "files": {"csv": os.path.basename(csv_path),
+                                          "plot": os.path.basename(plot_path)}}
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+
+        return csv_path, plot_path, report_path
 
     @staticmethod
     def _generate_plot(df, save_path):

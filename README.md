@@ -52,7 +52,7 @@ The GUI window opens with:
 - An execution log and progress bar tracking the training loop, with the live rate and an ETA measured from the first completed step — model loading would otherwise make every early estimate wildly pessimistic
 - A "Stop" button that ends the run at the next step boundary without freezing the window
 - Three tabbed graphs — **Thermal & Power**, **Utilization, Clock & Fan** and **Loss** — that are visible from the moment a run starts and redraw once a second as data arrives, then a **Benchmark Summary** table on completion. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
-- An "Export Results" button that writes the finished run to `logs/` as CSV + PNG
+- An "Export Results" button that writes the finished run to `logs/` as CSV + PNG + a JSON run report
 - A **View → Dark theme** toggle covering the widgets, the stylesheet and the charts. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
@@ -126,6 +126,7 @@ app/
   utils/
     logger.py                  — BenchmarkLogger: collects telemetry in memory, returns a DataFrame, exports CSV + PNG
     plots.py                   — chart panels shared by the window's tabs and the exported PNG
+    report.py                  — the versioned JSON run report written on export
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
 pytest.ini                     — pytest configuration
@@ -166,4 +167,6 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 
 ## Output
 
-During a run the graphs redraw once a second from the telemetry collected so far; after it, they get a final draw and the summary table appears. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) every preset ends before anything is written there. Both directories are gitignored.
+During a run the graphs redraw once a second from the telemetry collected so far; after it, they get a final draw and the summary table appears. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`), a two-panel plot PNG (`logs/plot_<timestamp>.png`) and a run report (`logs/report_<timestamp>.json`), and can be pressed repeatedly for the same run.
+
+The report is what makes a result comparable with anyone else's: the GPU, driver and CUDA version, the enforced power limit, the versions of torch, transformers, peft and bitsandbytes, every workload setting, every summary figure and the loss curve, plus the names of the CSV and PNG it belongs to. It carries a `schema_version`; fields are added rather than renamed, so older reports stay readable. A run that failed has no summary to report, so its telemetry exports as CSV and PNG only. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) every preset ends before anything is written there. Both directories are gitignored.

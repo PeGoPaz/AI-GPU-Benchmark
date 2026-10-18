@@ -46,6 +46,7 @@ from app.utils.plots import (
     draw_thermal_power,
     draw_utilization,
 )
+from app.utils.report import build_report
 
 SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 
@@ -308,10 +309,13 @@ class MainWindow(QMainWindow):
         self.telemetry = TelemetryWorker(interval_ms=250)
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
+        self.telemetry.device_info_ready.connect(self._on_device_info)
         self.telemetry.error_occurred.connect(self._on_telemetry_error)
         self.telemetry.start()
 
         self.trainer = None
+        self._device_info = None
+        self._last_summary = None
 
         # Live charts: redrawn from what the logger has collected so far.
         self._loss_steps, self._loss_values = [], []
@@ -331,6 +335,13 @@ class MainWindow(QMainWindow):
         """Updates the window title once the GPU name is detected."""
         self.setWindowTitle(f"AI GPU Benchmark — {gpu_name}")
         self.log_to_console(f"Detected GPU: {gpu_name}")
+
+    @pyqtSlot(dict)
+    def _on_device_info(self, info: dict):
+        self._device_info = info
+        if info.get("driver_version"):
+            self.log_to_console(
+                f"Driver {info['driver_version']}, CUDA {info.get('cuda_driver_version') or '?'}")
 
     @pyqtSlot(str)
     def _on_telemetry_error(self, message: str):
@@ -649,6 +660,7 @@ class MainWindow(QMainWindow):
     def on_benchmark_finished(self, summary: dict):
         self._live_timer.stop()
         self.btn_stop.setEnabled(False)
+        self._last_summary = summary
         df = self.logger.stop()
         if df is not None:
             self._render_plots(df, summary)
@@ -676,6 +688,7 @@ class MainWindow(QMainWindow):
         the app had to be restarted.
         """
         self._live_timer.stop()
+        self._last_summary = None
         self.log_to_console(f"ERROR: {message}")
         # Close the run, or its partial telemetry leaks into the next one.
         df = self.logger.stop()
@@ -794,13 +807,18 @@ class MainWindow(QMainWindow):
         if df is None:
             self.log_to_console("No data to export.")
             return
+        report = None
+        if self._last_summary is not None:
+            report = build_report(df, self._last_summary, self._device_info,
+                                  (self._loss_steps, self._loss_values))
         try:
-            csv_path, plot_path = BenchmarkLogger.export(df)
+            csv_path, plot_path, report_path = BenchmarkLogger.export(df, report=report)
         except OSError as e:
             self.log_to_console(f"Export failed: {e}")
             return
-        self.log_to_console(f"Exported: {csv_path}")
-        self.log_to_console(f"Exported: {plot_path}")
+        for path in (csv_path, plot_path, report_path):
+            if path:
+                self.log_to_console(f"Exported: {path}")
 
     def closeEvent(self, event):
         """Clean up threads on exit."""

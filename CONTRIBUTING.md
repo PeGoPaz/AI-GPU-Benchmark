@@ -47,9 +47,8 @@ Self-contained, a file or two each. Good first PRs.
 
 ### 2. Results worth keeping
 
-- **Run report.** One Markdown or JSON file per run: GPU, settings, final stats, paths to the CSV and PNG. Makes results shareable, and gives the next two features a stable format to read.
 - **Multi-run mode.** Three to five runs back to back, averaged, outliers dropped — the only way the numbers really mean anything. The run is parameterised already, so this is mostly orchestration.
-- **Historical overlay.** Load a previous run's CSV and draw its curves behind the current ones, to compare against your own baseline or someone else's card.
+- **Historical overlay.** Load a previous run's report (`report_<timestamp>.json` names its CSV) and draw its curves behind the current ones, to compare against your own baseline or someone else's card.
 
 ### 3. Inference benchmark
 

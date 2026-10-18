@@ -689,3 +689,50 @@ def test_stale_settings_fall_back_to_the_default(tmp_path, qapp, monkeypatch):
     assert win.cmb_model.currentText() == "Qwen2.5 1.5B"
     assert win.spin_steps.value() == 300
     win.close()
+
+
+
+# --- run report -----------------------------------------------------------------
+
+def _exported_report(tmp_path):
+    import json
+    [path] = (tmp_path / "logs").glob("report_*.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_export_writes_a_report_for_a_finished_run(window, telemetry_sample,
+                                                   tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window._on_device_info({"name": "NVIDIA GeForce RTX 4060",
+                            "driver_version": "580.82", "cuda_driver_version": "13.0"})
+    window.logger.start()
+    for i in range(5):
+        window.logger.log(telemetry_sample(i))
+    window._on_loss(1, 3.0)
+    window.on_benchmark_finished({
+        "model": "Qwen2.5 1.5B", "precision": "BF16", "total_steps": 150,
+        "requested_steps": 150, "aborted": False, "elapsed_time_sec": 70.0,
+        "steps_per_sec": 2.14,
+    })
+
+    window.export_results()
+
+    report = _exported_report(tmp_path)
+    assert report["gpu"]["driver_version"] == "580.82"
+    assert report["workload"]["model"] == "Qwen2.5 1.5B"
+    assert report["loss"]["values"] == [3.0]
+    assert "report_" in window.console.toPlainText()
+
+
+def test_failed_run_exports_telemetry_without_a_report(started_run, telemetry_sample,
+                                                       tmp_path, monkeypatch):
+    """No summary means nothing truthful to report — but the telemetry
+    leading up to the failure is still worth keeping."""
+    monkeypatch.chdir(tmp_path)
+    started_run.logger.log(telemetry_sample(0))
+    started_run.trainer.error_occurred.emit("HF Training Error: CUDA out of memory")
+
+    started_run.export_results()
+
+    written = sorted(p.suffix for p in (tmp_path / "logs").iterdir())
+    assert written == [".csv", ".png"]

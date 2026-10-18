@@ -135,15 +135,20 @@ def _patch_nvml(monkeypatch, **overrides):
         "nvmlDeviceGetCurrPcieLinkGeneration": lambda h: 4,
         "nvmlDeviceGetCurrPcieLinkWidth": lambda h: 16,
         "nvmlDeviceGetTotalEnergyConsumption": lambda h: 123_456_789,
+        "nvmlSystemGetDriverVersion": lambda: "580.82",
+        "nvmlSystemGetCudaDriverVersion": lambda: 13000,
+        "nvmlDeviceGetEnforcedPowerLimit": lambda h: 450_000,
     }
     defaults.update(overrides)
     for name, fn in defaults.items():
         monkeypatch.setattr(pynvml, name, fn)
 
 
-def _one_poll(worker):
+def _one_poll(worker, device=None):
     """Runs the worker's loop for exactly one snapshot."""
     snapshots, errors = [], []
+    worker.device_info_ready = mock.Mock(
+        emit=(device.append if device is not None else lambda *_: None))
 
     def capture(sample):
         snapshots.append(sample)
@@ -249,3 +254,41 @@ def test_snapshot_carries_the_throttle_mask(monkeypatch):
     snapshots, _ = _one_poll(telemetry.TelemetryWorker(interval_ms=1))
 
     assert snapshots[0]["throttle_reasons"] == 0x04
+
+
+
+# --- static device info --------------------------------------------------------
+
+def test_cuda_version_is_unpacked():
+    assert telemetry.format_cuda_version(12040) == "12.4"
+    assert telemetry.format_cuda_version(13000) == "13.0"
+    assert telemetry.format_cuda_version(None) is None
+
+
+def test_device_info_is_sent_once_at_startup(monkeypatch):
+    _patch_nvml(monkeypatch)
+    device = []
+    _one_poll(telemetry.TelemetryWorker(interval_ms=1), device=device)
+
+    assert device == [{
+        "name": "NVIDIA GeForce RTX 4090",
+        "driver_version": "580.82",
+        "cuda_driver_version": "13.0",
+        "vram_total_mb": 24576.0,
+        "power_limit_w": 450.0,
+        "pcie_gen_max": 4,
+        "pcie_width_max": 16,
+    }]
+
+
+def test_device_info_tolerates_missing_queries(monkeypatch):
+    def unsupported(*_a, **_k):
+        raise Exception("NVML_ERROR_NOT_SUPPORTED")
+
+    _patch_nvml(monkeypatch, nvmlSystemGetDriverVersion=unsupported,
+                nvmlDeviceGetEnforcedPowerLimit=unsupported)
+    device = []
+    _one_poll(telemetry.TelemetryWorker(interval_ms=1), device=device)
+
+    assert device[0]["driver_version"] is None
+    assert device[0]["power_limit_w"] is None

@@ -427,6 +427,7 @@ class TrainerWorker(QThread):
                 # Recorded so the summary says what was benchmarked, not just
                 # how fast it went — the numbers mean nothing without it.
                 "model": self.model_spec.label,
+                "model_id": self.model_spec.model_id,
                 "batch_size": self.batch_size,
                 "precision": self.precision.label,
                 "seq_len": self.seq_len,
