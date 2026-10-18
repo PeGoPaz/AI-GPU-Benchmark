@@ -24,6 +24,7 @@ from app.core.telemetry import TelemetryWorker
 from app.core.trainer import MODELS, PRECISIONS, TrainerWorker
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
+from app.utils.plots import draw_thermal_power, draw_utilization
 
 
 class MainWindow(QMainWindow):
@@ -341,63 +342,13 @@ class MainWindow(QMainWindow):
 
     def _render_plots(self, df, summary: dict):
         """Draws thermal/power and utilization/clock plots into tabs."""
-        # --- Tab 1: Thermal & Power ---
-        tf = self.thermal_canvas.figure
-        tf.clear()
-        ax1 = tf.add_subplot(111)
-        ax1.plot(df['time_sec'], df['temp_gpu'], color='#ff4c4c',
-                 label='GPU Temp (°C)', linewidth=2)
-        ax1.set_xlabel('Time (seconds)')
-        ax1.set_ylabel('Temperature (°C)', color='#ff4c4c')
-        ax1.tick_params(axis='y', labelcolor='#ff4c4c')
-        ax1.set_title('Thermal & Power Curve')
-
-        ax2 = ax1.twinx()
-        ax2.plot(df['time_sec'], df['power_w'], color='#4c72ff',
-                 label='Power Draw (W)', linewidth=2, linestyle='--')
-        ax2.set_ylabel('Power (W)', color='#4c72ff')
-        ax2.tick_params(axis='y', labelcolor='#4c72ff')
-
-        ax1.grid(True, alpha=0.2)
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
-        tf.tight_layout()
-        self.thermal_canvas.draw()
-
-        # --- Tab 2: Utilization & Clock ---
-        uf = self.util_canvas.figure
-        uf.clear()
-        ax3 = uf.add_subplot(111)
-        ax3.plot(df['time_sec'], df['gpu_util_pct'], color='#ffa500',
-                 label='GPU Utilization (%)', linewidth=2)
-
-        # Fan duty cycle belongs on the percentage axis beside utilization.
-        # Absent on passively cooled cards, so it is drawn only when collected.
-        if 'fan_speed_pct' in df.columns and df['fan_speed_pct'].notna().any():
-            ax3.plot(df['time_sec'], df['fan_speed_pct'], color='#a06bff',
-                     label='Fan (%)', linewidth=2, linestyle=':')
-
-        ax3.set_xlabel('Time (seconds)')
-        ax3.set_ylabel('Utilization / Fan (%)')
-        ax3.set_ylim(0, 105)
-        ax3.set_title('Utilization, Clock & Fan')
-
-        # The clock needs its own axis: at ~2500 MHz it shares no useful scale
-        # with percentages, and plotting both on one axis flattened every
-        # percentage curve onto the zero line.
-        ax4 = ax3.twinx()
-        ax4.plot(df['time_sec'], df['sm_clock_mhz'], color='#00bfff',
-                 label='SM Clock (MHz)', linewidth=2, linestyle='--')
-        ax4.set_ylabel('Clock (MHz)', color='#00bfff')
-        ax4.tick_params(axis='y', labelcolor='#00bfff')
-
-        lines_3, labels_3 = ax3.get_legend_handles_labels()
-        lines_4, labels_4 = ax4.get_legend_handles_labels()
-        ax3.legend(lines_3 + lines_4, labels_3 + labels_4, loc='upper left')
-        ax3.grid(True, alpha=0.2)
-        uf.tight_layout()
-        self.util_canvas.draw()
+        for canvas, draw in ((self.thermal_canvas, draw_thermal_power),
+                             (self.util_canvas, draw_utilization)):
+            figure = canvas.figure
+            figure.clear()
+            draw(figure.add_subplot(111), df)
+            figure.tight_layout()
+            canvas.draw()
 
         self.plot_tabs.setVisible(True)
         self.plot_tabs.setCurrentIndex(0)

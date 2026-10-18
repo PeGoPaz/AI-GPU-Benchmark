@@ -1,8 +1,9 @@
 import os
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import pandas as pd
+
+from app.utils.plots import build_report_figure
 
 
 class BenchmarkLogger:
@@ -60,55 +61,4 @@ class BenchmarkLogger:
 
     @staticmethod
     def _generate_plot(df, save_path):
-        fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(10, 7))
-
-        # --- Top: Thermal & Power ---
-        ax1.plot(df['time_sec'], df['temp_gpu'], color='#ff4c4c',
-                 label='GPU Temp (°C)', linewidth=2)
-        ax1.set_ylabel('Temperature (°C)', color='#ff4c4c')
-        ax1.tick_params(axis='y', labelcolor='#ff4c4c')
-
-        ax2 = ax1.twinx()
-        ax2.plot(df['time_sec'], df['power_w'], color='#4c72ff',
-                 label='Power Draw (W)', linewidth=2, linestyle='--')
-        ax2.set_ylabel('Power (W)', color='#4c72ff')
-        ax2.tick_params(axis='y', labelcolor='#4c72ff')
-        ax1.set_title('Thermal & Power Curve')
-
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
-        ax1.grid(True, alpha=0.2)
-
-        # --- Bottom: Utilization & Clock ---
-        ax3.plot(df['time_sec'], df['gpu_util_pct'], color='#ffa500',
-                 label='GPU Utilization (%)', linewidth=2)
-
-        # Fan duty cycle belongs on the percentage axis beside utilization.
-        # Absent on passively cooled cards, so it is drawn only when collected.
-        if 'fan_speed_pct' in df.columns and df['fan_speed_pct'].notna().any():
-            ax3.plot(df['time_sec'], df['fan_speed_pct'], color='#a06bff',
-                     label='Fan (%)', linewidth=2, linestyle=':')
-
-        ax3.set_xlabel('Time (seconds)')
-        ax3.set_ylabel('Utilization / Fan (%)')
-        ax3.set_ylim(0, 105)
-        ax3.set_title('Utilization, Clock & Fan')
-
-        # The clock needs its own axis: at ~2500 MHz it shares no useful scale
-        # with percentages, and plotting both on one axis flattened every
-        # percentage curve onto the zero line.
-        ax4 = ax3.twinx()
-        ax4.plot(df['time_sec'], df['sm_clock_mhz'], color='#00bfff',
-                 label='SM Clock (MHz)', linewidth=2, linestyle='--')
-        ax4.set_ylabel('Clock (MHz)', color='#00bfff')
-        ax4.tick_params(axis='y', labelcolor='#00bfff')
-
-        lines_3, labels_3 = ax3.get_legend_handles_labels()
-        lines_4, labels_4 = ax4.get_legend_handles_labels()
-        ax3.legend(lines_3 + lines_4, labels_3 + labels_4, loc='upper left')
-        ax3.grid(True, alpha=0.2)
-
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=300)
-        plt.close()
+        build_report_figure(df).savefig(save_path, dpi=300)

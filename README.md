@@ -94,6 +94,7 @@ app/
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion
   utils/
     logger.py                  — BenchmarkLogger: collects telemetry in memory, returns a DataFrame, exports CSV + PNG
+    plots.py                   — chart panels shared by the window's tabs and the exported PNG
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
 pytest.ini                     — pytest configuration

@@ -342,3 +342,20 @@ def test_tab_labels_keep_their_ampersand(window):
     labels = [window.plot_tabs.tabText(i) for i in range(window.plot_tabs.count())]
 
     assert labels == ["Thermal && Power", "Utilization, Clock && Fan"]
+
+
+def test_window_and_export_draw_the_same_series(window, telemetry_sample):
+    """The tabs and the PNG used to be two hand-maintained copies of the same
+    charts, and every change to one had to be repeated in the other."""
+    from app.utils.plots import build_report_figure
+
+    _finish_run(window, telemetry_sample)
+    on_screen = sorted(line.get_label()
+                       for canvas in (window.thermal_canvas, window.util_canvas)
+                       for axes in canvas.figure.axes
+                       for line in axes.get_lines())
+    exported = sorted(line.get_label()
+                      for axes in build_report_figure(window.logger.to_dataframe()).axes
+                      for line in axes.get_lines())
+
+    assert on_screen == exported
