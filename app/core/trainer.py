@@ -163,7 +163,8 @@ class TrainerWorker(QThread):
     def __init__(self, steps: int = 150, batch_size: int = 4,
                  model: ModelSpec = DEFAULT_MODEL, warmup_steps: int = 10,
                  precision: PrecisionSpec = DEFAULT_PRECISION,
-                 seq_len: int = DEFAULT_SEQ_LEN, parent=None):
+                 seq_len: int = DEFAULT_SEQ_LEN,
+                 gradient_checkpointing: bool = False, parent=None):
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
@@ -171,6 +172,7 @@ class TrainerWorker(QThread):
         self.precision = precision
         self.warmup_steps = warmup_steps
         self.seq_len = seq_len
+        self.gradient_checkpointing = gradient_checkpointing
         self.completed_steps = 0
         # Stays None until the timed window opens, which is how a run stopped
         # during warm-up is told apart from one that never started timing.
@@ -226,6 +228,15 @@ class TrainerWorker(QThread):
                 bias="none",
                 task_type="CAUSAL_LM"
             )
+            # With every base weight frozen, nothing entering a checkpointed
+            # block requires grad, and the reentrant implementation then skips
+            # the backward pass through it: the adapters inside train on
+            # nothing while the loss curve looks perfectly normal. Non-reentrant
+            # checkpointing (below) does not have that failure; making the
+            # embedding output require grad covers anything that still
+            # takes the reentrant path.
+            if self.gradient_checkpointing:
+                model.enable_input_require_grads()
             model = get_peft_model(model, config)
 
             # 4. Set up Hugging Face Trainer
@@ -238,6 +249,10 @@ class TrainerWorker(QThread):
                 learning_rate=2e-4,
                 fp16=self.precision.fp16,
                 bf16=self.precision.bf16,
+                # Recomputes activations in the backward pass instead of
+                # keeping them: far less VRAM for roughly a third more compute.
+                gradient_checkpointing=self.gradient_checkpointing,
+                gradient_checkpointing_kwargs={"use_reentrant": False},
                 report_to="none" # Disables wandb/tensorboard logging
             )
 
@@ -281,6 +296,7 @@ class TrainerWorker(QThread):
                 "batch_size": self.batch_size,
                 "precision": self.precision.label,
                 "seq_len": self.seq_len,
+                "gradient_checkpointing": self.gradient_checkpointing,
                 "warmup_steps": self.warmup_steps,
                 "total_steps": steps_done,
                 "requested_steps": self.steps,

@@ -369,3 +369,32 @@ def test_whole_split_is_packed_in_one_pass():
 
 def test_summary_records_the_sequence_length():
     assert run_worker(seq_len=1024)["summary"]["seq_len"] == 1024
+
+
+# --- gradient checkpointing ---------------------------------------------------
+
+def test_checkpointing_reaches_training_arguments():
+    args = run_worker(gradient_checkpointing=True)[
+        "mocks"]["TrainingArguments"].call_args.kwargs
+
+    assert args["gradient_checkpointing"] is True
+    assert args["gradient_checkpointing_kwargs"] == {"use_reentrant": False}
+
+
+def test_checkpointing_makes_frozen_inputs_require_grad():
+    """Without it the reentrant path skips backward through every block and
+    the LoRA adapters inside receive no gradient at all."""
+    base = run_worker(gradient_checkpointing=True)[
+        "mocks"]["AutoModelForCausalLM"].from_pretrained.return_value
+
+    base.enable_input_require_grads.assert_called_once()
+
+
+def test_checkpointing_is_off_by_default():
+    result = run_worker()
+    base = result["mocks"]["AutoModelForCausalLM"].from_pretrained.return_value
+
+    assert result["mocks"]["TrainingArguments"].call_args.kwargs[
+        "gradient_checkpointing"] is False
+    base.enable_input_require_grads.assert_not_called()
+    assert result["summary"]["gradient_checkpointing"] is False

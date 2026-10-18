@@ -301,6 +301,7 @@ def test_workload_settings_reach_the_trainer(window, monkeypatch):
     window.cmb_model.setCurrentIndex(1)
     window.cmb_precision.setCurrentIndex(1)          # FP16
     window.cmb_seq_len.setCurrentIndex(window.cmb_seq_len.findData(1024))
+    window.chk_checkpointing.setChecked(True)
     chosen = window.cmb_model.currentData()
     window.start_benchmark()
 
@@ -310,6 +311,7 @@ def test_workload_settings_reach_the_trainer(window, monkeypatch):
     assert window.trainer.kwargs["model"] is chosen
     assert window.trainer.kwargs["precision"].label == "FP16"
     assert window.trainer.kwargs["seq_len"] == 1024
+    assert window.trainer.kwargs["gradient_checkpointing"] is True
 
 
 def test_settings_are_locked_during_a_run(started_run):
@@ -328,6 +330,7 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
 
     window.on_benchmark_finished({
         "model": "Qwen2.5 1.5B", "batch_size": 8, "precision": "FP16", "seq_len": 512,
+        "gradient_checkpointing": True,
         "total_steps": 300, "requested_steps": 300, "aborted": False,
         "elapsed_time_sec": 70.0, "steps_per_sec": 4.29,
     })
@@ -337,6 +340,7 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
     assert rows["Batch Size"] == "8"
     assert rows["Precision"] == "FP16"
     assert rows["Sequence Length"] == "512"
+    assert rows["Gradient Checkpointing"] == "On"
 
 
 def test_tab_labels_keep_their_ampersand(window):

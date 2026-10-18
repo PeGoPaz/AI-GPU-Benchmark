@@ -2,6 +2,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -105,6 +106,13 @@ class MainWindow(QMainWindow):
             "with it, attention quadratically — the main lever on run length."
         )
 
+        self.chk_checkpointing = QCheckBox("Gradient checkpointing")
+        self.chk_checkpointing.setToolTip(
+            "Recomputes activations during the backward pass instead of storing "
+            "them: far less VRAM, roughly a third more compute per step. Needed "
+            "for long sequences on small cards."
+        )
+
         self.spin_warmup = QSpinBox()
         self.spin_warmup.setRange(0, 100)
         self.spin_warmup.setValue(10)
@@ -119,6 +127,7 @@ class MainWindow(QMainWindow):
         workload_layout.addRow("Precision:", self.cmb_precision)
         workload_layout.addRow("Sequence length:", self.cmb_seq_len)
         workload_layout.addRow("Warm-up steps:", self.spin_warmup)
+        workload_layout.addRow(self.chk_checkpointing)
         self.workload_group.setLayout(workload_layout)
         left_panel.addWidget(self.workload_group)
 
@@ -306,6 +315,7 @@ class MainWindow(QMainWindow):
             warmup_steps=self.spin_warmup.value(),
             precision=self.cmb_precision.currentData(),
             seq_len=self.cmb_seq_len.currentData(),
+            gradient_checkpointing=self.chk_checkpointing.isChecked(),
         )
         self.trainer.status_updated.connect(self.log_to_console)
         self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
@@ -393,11 +403,16 @@ class MainWindow(QMainWindow):
         if summary.get('aborted'):
             steps_label += f" of {summary['requested_steps']} (stopped early)"
 
+        checkpointing = "—"
+        if "gradient_checkpointing" in summary:
+            checkpointing = "On" if summary["gradient_checkpointing"] else "Off"
+
         metrics = [
             ("Model", summary.get("model", "—")),
             ("Batch Size", str(summary.get("batch_size", "—"))),
             ("Precision", summary.get("precision", "—")),
             ("Sequence Length", str(summary.get("seq_len", "—"))),
+            ("Gradient Checkpointing", checkpointing),
             ("Warm-up Steps", str(summary.get("warmup_steps", "—"))),
             ("Steps Completed", steps_label),
             ("Duration (s)", f"{summary['elapsed_time_sec']:.2f}"),
