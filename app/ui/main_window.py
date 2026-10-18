@@ -23,9 +23,10 @@ from PyQt6.QtWidgets import (
 
 from app.core.telemetry import TelemetryWorker
 from app.core.trainer import (
-    DEFAULT_SEQ_LEN,
+    DEFAULT_PRESET,
     MODELS,
     PRECISIONS,
+    PRESETS,
     SEQ_LENGTHS,
     VRAM_RESERVE_GIB,
     TrainerWorker,
@@ -76,6 +77,15 @@ class MainWindow(QMainWindow):
         self.workload_group = QGroupBox("Workload")
         workload_layout = QFormLayout()
 
+        # Fills in every field below; editing any of them by hand turns the
+        # selection into Custom, and matching a preset again turns it back.
+        self.cmb_preset = QComboBox()
+        for i, preset in enumerate(PRESETS):
+            self.cmb_preset.addItem(preset.label, preset)
+            self.cmb_preset.setItemData(i, preset.description,
+                                        Qt.ItemDataRole.ToolTipRole)
+        self.cmb_preset.addItem("Custom", None)
+
         self.cmb_model = QComboBox()
         for i, spec in enumerate(MODELS):
             self.cmb_model.addItem(spec.label, spec)
@@ -86,11 +96,9 @@ class MainWindow(QMainWindow):
         self.spin_steps = QSpinBox()
         self.spin_steps.setRange(10, 5000)
         self.spin_steps.setSingleStep(10)
-        self.spin_steps.setValue(150)
 
         self.spin_batch = QSpinBox()
         self.spin_batch.setRange(1, 64)
-        self.spin_batch.setValue(4)
 
         self.cmb_precision = QComboBox()
         for spec in PRECISIONS:
@@ -104,7 +112,6 @@ class MainWindow(QMainWindow):
         self.cmb_seq_len = QComboBox()
         for length in SEQ_LENGTHS:
             self.cmb_seq_len.addItem(f"{length} tokens", length)
-        self.cmb_seq_len.setCurrentIndex(SEQ_LENGTHS.index(DEFAULT_SEQ_LEN))
         self.cmb_seq_len.setToolTip(
             "Tokens per training sequence. Compute and activation memory grow "
             "with it, attention quadratically — the main lever on run length."
@@ -125,6 +132,7 @@ class MainWindow(QMainWindow):
             "kernel compilation out of the measured window."
         )
 
+        workload_layout.addRow("Preset:", self.cmb_preset)
         workload_layout.addRow("Model:", self.cmb_model)
         workload_layout.addRow("Steps:", self.spin_steps)
         workload_layout.addRow("Batch size:", self.spin_batch)
@@ -226,6 +234,17 @@ class MainWindow(QMainWindow):
         self._vram_total_mib = None          # MiB, from the first snapshot
         self.cmb_model.currentIndexChanged.connect(self._update_fit_hint)
         self.cmb_precision.currentIndexChanged.connect(self._update_fit_hint)
+
+        self._applying_preset = False
+        self.cmb_preset.currentIndexChanged.connect(self._on_preset_selected)
+        for signal in (self.cmb_model.currentIndexChanged,
+                       self.spin_steps.valueChanged,
+                       self.spin_batch.valueChanged,
+                       self.cmb_precision.currentIndexChanged,
+                       self.cmb_seq_len.currentIndexChanged,
+                       self.chk_checkpointing.toggled):
+            signal.connect(self._sync_preset_combo)
+        self._apply_preset(DEFAULT_PRESET)
         self._update_fit_hint()
 
         # --- INITIALIZE THREADS ---
@@ -311,6 +330,47 @@ class MainWindow(QMainWindow):
         if gen_max and width_max and (gen, width) != (gen_max, width_max):
             text += f" (max Gen{gen_max} x{width_max})"
         return text
+
+    def _apply_preset(self, preset):
+        """Writes a preset into the fields without bouncing back to Custom."""
+        self._applying_preset = True
+        try:
+            self.cmb_model.setCurrentIndex(MODELS.index(preset.model))
+            self.cmb_precision.setCurrentIndex(PRECISIONS.index(preset.precision))
+            self.spin_steps.setValue(preset.steps)
+            self.spin_batch.setValue(preset.batch_size)
+            self.cmb_seq_len.setCurrentIndex(SEQ_LENGTHS.index(preset.seq_len))
+            self.chk_checkpointing.setChecked(preset.gradient_checkpointing)
+        finally:
+            self._applying_preset = False
+        self._sync_preset_combo()
+
+    def _matching_preset(self):
+        """The preset the fields currently spell out, or None for Custom."""
+        current = (self.cmb_model.currentData(), self.cmb_precision.currentData(),
+                   self.spin_steps.value(), self.spin_batch.value(),
+                   self.cmb_seq_len.currentData(), self.chk_checkpointing.isChecked())
+        for preset in PRESETS:
+            if current == (preset.model, preset.precision, preset.steps,
+                           preset.batch_size, preset.seq_len,
+                           preset.gradient_checkpointing):
+                return preset
+        return None
+
+    def _on_preset_selected(self, index: int):
+        preset = self.cmb_preset.itemData(index)
+        # Picking Custom by hand keeps whatever the fields already hold.
+        if preset is not None:
+            self._apply_preset(preset)
+
+    def _sync_preset_combo(self):
+        if self._applying_preset:
+            return
+        preset = self._matching_preset()
+        index = len(PRESETS) if preset is None else PRESETS.index(preset)
+        self.cmb_preset.blockSignals(True)
+        self.cmb_preset.setCurrentIndex(index)
+        self.cmb_preset.blockSignals(False)
 
     def _update_fit_hint(self):
         """Shows the weights' footprint against the card, flagging a misfit.

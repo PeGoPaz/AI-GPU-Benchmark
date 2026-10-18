@@ -132,6 +132,50 @@ def fits_in_vram(model: ModelSpec, precision: PrecisionSpec,
     return estimate_weights_gib(model, precision) <= budget_gib
 
 
+@dataclass(frozen=True)
+class WorkloadPreset:
+    """A named, known-good combination of the workload settings.
+
+    Sized for an 8 GB card, each one more work than the last. Seven billion
+    parameters only fit there at 4 bits, and Stress stays at 512 tokens:
+    Qwen's 152k-token vocabulary makes the FP32 logits alone ~0.6 GB per
+    1024-token sequence, with their gradient on top.
+    """
+
+    label: str
+    model: ModelSpec
+    precision: PrecisionSpec
+    steps: int
+    batch_size: int
+    seq_len: int
+    gradient_checkpointing: bool
+    description: str
+
+
+def _find(registry, label):
+    return next(spec for spec in registry if spec.label == label)
+
+
+PRESETS = (
+    WorkloadPreset("Quick", _find(MODELS, "TinyLlama 1.1B"), _find(PRECISIONS, "BF16"),
+                   steps=150, batch_size=4, seq_len=128, gradient_checkpointing=False,
+                   description="A smoke test: a minute or two on most cards."),
+    WorkloadPreset("Standard", _find(MODELS, "Qwen2.5 1.5B"), _find(PRECISIONS, "BF16"),
+                   steps=300, batch_size=2, seq_len=512, gradient_checkpointing=True,
+                   description="Long enough for clocks and temperatures to settle."),
+    WorkloadPreset("Extended", _find(MODELS, "Qwen2.5 3B"), _find(PRECISIONS, "INT4 (NF4)"),
+                   steps=200, batch_size=1, seq_len=1024, gradient_checkpointing=True,
+                   description="QLoRA on a 3B model at 1024 tokens — a sustained "
+                               "thermal soak."),
+    WorkloadPreset("Stress", _find(MODELS, "Qwen2.5 7B"), _find(PRECISIONS, "INT4 (NF4)"),
+                   steps=250, batch_size=1, seq_len=512, gradient_checkpointing=True,
+                   description="The largest model an 8 GB card can train: 7B at "
+                               "4 bits. Expect a long run."),
+)
+
+DEFAULT_PRESET = _find(PRESETS, "Standard")
+
+
 def quantization_config(precision: PrecisionSpec):
     """bitsandbytes settings for a quantized precision, None for a plain dtype."""
     if precision.quant_bits is None:

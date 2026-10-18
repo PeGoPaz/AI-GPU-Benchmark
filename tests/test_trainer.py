@@ -503,3 +503,39 @@ def test_fit_check_keeps_the_reserve_free():
 
     assert not trainer_module.fits_in_vram(tiny, _precision("BF16"), weights_mib + 512)
     assert trainer_module.fits_in_vram(tiny, _precision("BF16"), weights_mib + 1024)
+
+
+# --- presets ------------------------------------------------------------------
+
+def test_every_preset_fits_an_8gb_card():
+    for preset in trainer_module.PRESETS:
+        assert trainer_module.fits_in_vram(preset.model, preset.precision, 8192), \
+            preset.label
+
+
+def test_presets_stay_inside_what_the_panel_accepts():
+    for preset in trainer_module.PRESETS:
+        assert preset.seq_len in trainer_module.SEQ_LENGTHS, preset.label
+        assert 10 <= preset.steps <= 5000, preset.label
+        assert 1 <= preset.batch_size <= 64, preset.label
+
+
+def test_each_preset_is_more_work_than_the_last():
+    """Parameters × tokens × steps, with checkpointing's recompute on top."""
+    def work(p):
+        recompute = 1.5 if p.gradient_checkpointing else 1.0
+        return p.model.params_b * p.batch_size * p.seq_len * p.steps * recompute
+
+    amounts = [work(p) for p in trainer_module.PRESETS]
+    assert amounts == sorted(amounts)
+    assert len(set(amounts)) == len(amounts)
+
+
+def test_default_preset_is_heavier_than_the_old_hardcoded_run():
+    """The old fixed run — 150 steps of TinyLlama at 128 tokens — finished
+    before clocks and temperatures had settled."""
+    preset = trainer_module.DEFAULT_PRESET
+
+    assert preset.label == "Standard"
+    assert preset.model.params_b > 1.1
+    assert preset.seq_len > 128

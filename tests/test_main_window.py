@@ -415,3 +415,53 @@ def test_misfit_is_a_warning_not_a_lock(window, telemetry_sample, monkeypatch):
 
     assert window.trainer._started
     assert "WARNING: Weights" in window.console.toPlainText()
+
+
+
+def test_window_opens_on_the_standard_preset(window):
+    assert window.cmb_preset.currentText() == "Standard"
+    assert window.cmb_model.currentText() == "Qwen2.5 1.5B"
+    assert window.spin_steps.value() == 300
+    assert window.cmb_seq_len.currentData() == 512
+    assert window.chk_checkpointing.isChecked()
+
+
+def test_choosing_a_preset_fills_every_field(window):
+    _select(window.cmb_preset, "Stress")
+
+    assert window.cmb_model.currentText() == "Qwen2.5 7B"
+    assert window.cmb_precision.currentText() == "INT4 (NF4)"
+    assert window.spin_batch.value() == 1
+    assert window.cmb_preset.currentText() == "Stress"
+
+
+def test_editing_a_field_switches_to_custom_and_back(window):
+    window.spin_steps.setValue(310)
+    assert window.cmb_preset.currentText() == "Custom"
+
+    window.spin_steps.setValue(300)
+    assert window.cmb_preset.currentText() == "Standard"
+
+
+def test_picking_custom_keeps_the_current_values(window):
+    _select(window.cmb_preset, "Quick")
+    _select(window.cmb_preset, "Custom")
+
+    assert window.cmb_model.currentText() == "TinyLlama 1.1B"
+    assert window.spin_steps.value() == 150
+
+
+def test_preset_reaches_the_trainer(window, monkeypatch, telemetry_sample):
+    import app.ui.main_window as mw
+    monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
+    window.update_telemetry_ui(telemetry_sample(0, vram_total_mb=8192))
+    _select(window.cmb_preset, "Stress")
+
+    window.start_benchmark()
+
+    kwargs = window.trainer.kwargs
+    assert kwargs["model"].label == "Qwen2.5 7B"
+    assert kwargs["precision"].label == "INT4 (NF4)"
+    assert (kwargs["steps"], kwargs["batch_size"], kwargs["seq_len"]) == (250, 1, 512)
+    assert kwargs["gradient_checkpointing"] is True
+    assert "WARNING" not in window.console.toPlainText()
