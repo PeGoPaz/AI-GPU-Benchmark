@@ -49,9 +49,9 @@ The GUI window opens with:
 - Automatic GPU name detection shown in the window title
 - A **Workload** panel with four presets (Quick, Standard, Extended, Stress) and the individual fields behind them — editing any field switches to Custom. It picks the model (TinyLlama 1.1B, Qwen2.5 1.5B, Phi-2 2.7B, Qwen2.5 3B, Phi-3.5 mini 3.8B, Qwen2.5 7B), step count, batch size, precision, sequence length, warm-up steps and gradient checkpointing, locked for the duration of a run. Under it, an estimate of the model's weights against the card's VRAM turns into a warning when the selection will not fit — the 7B model needs INT4 on an 8 GB card
 - A "Start Stress Test" button — launches the LoRA fine-tuning run
-- An execution log and progress bar tracking the training loop
+- An execution log and progress bar tracking the training loop, with the live rate and an ETA measured from the first completed step — model loading would otherwise make every early estimate wildly pessimistic
 - A "Stop" button that ends the run at the next step boundary without freezing the window
-- On completion, two tabbed graphs rendered directly in the window — **Thermal & Power** and **Utilization, Clock & Fan** — alongside a **Benchmark Summary** table
+- Three tabbed graphs — **Thermal & Power**, **Utilization, Clock & Fan** and **Loss** — that are visible from the moment a run starts and redraw once a second as data arrives, then a **Benchmark Summary** table on completion. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
 - An "Export Results" button that writes the finished run to `logs/` as CSV + PNG
 
 ---
@@ -164,4 +164,4 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 
 ## Output
 
-After each benchmark, both graphs and a summary table are displayed inline in the GUI. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) every preset ends before anything is written there. Both directories are gitignored.
+During a run the graphs redraw once a second from the telemetry collected so far; after it, they get a final draw and the summary table appears. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`) and a two-panel plot PNG (`logs/plot_<timestamp>.png`), and can be pressed repeatedly for the same run. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) every preset ends before anything is written there. Both directories are gitignored.

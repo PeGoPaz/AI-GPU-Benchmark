@@ -20,8 +20,11 @@ CLOCK_COLOR = '#00bfff'
 POWER_LIMIT_COLOR = '#ff8c00'
 THERMAL_LIMIT_COLOR = '#ff2020'
 
+LOSS_COLOR = '#2e8b57'
+
 THERMAL_TITLE = 'Thermal & Power Curve'
 UTILIZATION_TITLE = 'Utilization, Clock & Fan'
+LOSS_TITLE = 'Training Loss'
 
 
 def _merge_legends(ax: Axes, twin: Axes) -> None:
@@ -116,6 +119,26 @@ def draw_utilization(ax: Axes, df) -> Axes:
     ax.grid(True, alpha=0.2)
     _merge_legends(ax, twin)
     return twin
+
+
+def draw_loss(ax: Axes, steps: list[int], losses: list[float],
+              warmup_steps: int = 0) -> None:
+    """Training loss per optimizer step, with the start of timing marked.
+
+    Not a convergence plot — the run is far too short for that — but a
+    cheap check that the adapters are training at all: a flat line means
+    gradients are not reaching them.
+    """
+    ax.plot(steps, losses, color=LOSS_COLOR, label='Loss', linewidth=1.5)
+    if warmup_steps and steps and steps[-1] >= warmup_steps:
+        ax.axvline(warmup_steps, color='grey', linestyle=':', linewidth=1,
+                   label='Timing starts')
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Loss')
+    ax.set_title(LOSS_TITLE)
+    ax.grid(True, alpha=0.2)
+    if steps:
+        ax.legend(loc='upper right')
 
 
 def build_report_figure(df) -> Figure:

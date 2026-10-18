@@ -21,6 +21,9 @@ class _FakeWorker:
         self.measure_start = None
         self.progress_updated = types.SimpleNamespace(emit=lambda *_: None)
         self.status_updated = types.SimpleNamespace(emit=lambda *_: None)
+        self.losses = []
+        self.loss_updated = types.SimpleNamespace(
+            emit=lambda step, loss: self.losses.append((step, loss)))
 
 
 def _drive_callback(steps, stop_at=None, warmup_steps=0):
@@ -54,7 +57,8 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, warmup_elapsed=5.0,
     captured = {}
     worker_kwargs.setdefault("warmup_steps", 0)
     worker = TrainerWorker(steps=steps, **worker_kwargs)
-    for signal in ("status_updated", "max_steps_ready", "progress_updated"):
+    for signal in ("status_updated", "max_steps_ready", "progress_updated",
+                   "loss_updated"):
         setattr(worker, signal, types.SimpleNamespace(emit=lambda *_: None))
     worker.error_occurred = types.SimpleNamespace(
         emit=lambda m: captured.setdefault("error", m))
@@ -565,3 +569,43 @@ def test_window_stays_unbounded_when_warmup_never_finished():
 
     assert summary["measure_start"] is None
     assert summary["measure_end"] is None
+
+
+# --- loss reporting -----------------------------------------------------------
+
+def test_loss_is_reported_with_the_step_it_belongs_to():
+    """Reading log_history in on_step_end always gave the previous step's
+    loss: HF logs a step only after its on_step_end callbacks have run."""
+    worker = _FakeWorker()
+    cb = PyQtProgressCallback(worker)
+    state = types.SimpleNamespace(global_step=7, log_history=[{"loss": 9.9}])
+
+    cb.on_log(None, state, None, logs={"loss": 2.5, "learning_rate": 2e-4})
+
+    assert worker.losses == [(7, 2.5)]
+
+
+def test_closing_summary_log_is_not_a_loss_point():
+    """The final log carries train_loss — the run average — not a step loss."""
+    worker = _FakeWorker()
+    cb = PyQtProgressCallback(worker)
+    state = types.SimpleNamespace(global_step=150, log_history=[])
+
+    cb.on_log(None, state, None, logs={"train_loss": 1.8, "train_runtime": 70.0})
+    cb.on_log(None, state, None, logs=None)
+
+    assert worker.losses == []
+
+
+def test_progress_reports_the_step_alone():
+    steps = []
+    worker = _FakeWorker()
+    worker.progress_updated = types.SimpleNamespace(emit=steps.append)
+    cb = PyQtProgressCallback(worker)
+    control = types.SimpleNamespace(should_training_stop=False)
+
+    for step in (1, 2, 3):
+        cb.on_step_end(None, types.SimpleNamespace(global_step=step, log_history=[]),
+                       control)
+
+    assert steps == [1, 2, 3]

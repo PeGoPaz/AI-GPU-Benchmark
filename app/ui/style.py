@@ -78,7 +78,7 @@ QLabel[role="metric"][warning="true"] {{
     color: {WARNING_AMBER};
 }}
 
-QLabel#fitHint {{
+QLabel#fitHint, QLabel#progressInfo {{
     color: {DISABLED_FG};
 }}
 

@@ -265,14 +265,21 @@ class PyQtProgressCallback(TrainerCallback):
                 f"the next {self.worker.steps}..."
             )
 
-        # Emit the current step and the latest loss value
-        loss = state.log_history[-1].get("loss", 0.0) if state.log_history else 0.0
-        self.worker.progress_updated.emit(state.global_step, loss)
+        self.worker.progress_updated.emit(state.global_step)
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        # The loss comes from here rather than from log_history in
+        # on_step_end: HF logs a step only after its on_step_end callbacks
+        # have run, so reading it there always reported the previous step.
+        # The closing summary log carries train_loss instead and is skipped.
+        if logs and "loss" in logs:
+            self.worker.loss_updated.emit(state.global_step, float(logs["loss"]))
 
 
 class TrainerWorker(QThread):
     status_updated = pyqtSignal(str)
-    progress_updated = pyqtSignal(int, float)
+    progress_updated = pyqtSignal(int)
+    loss_updated = pyqtSignal(int, float)
     training_finished = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
     max_steps_ready = pyqtSignal(int)

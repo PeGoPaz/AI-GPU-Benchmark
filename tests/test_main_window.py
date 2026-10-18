@@ -18,7 +18,8 @@ class FakeTrainer(QObject):
     """Stands in for TrainerWorker: same signals, but starts no thread."""
 
     status_updated = pyqtSignal(str)
-    progress_updated = pyqtSignal(int, float)
+    progress_updated = pyqtSignal(int)
+    loss_updated = pyqtSignal(int, float)
     training_finished = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
     max_steps_ready = pyqtSignal(int)
@@ -348,7 +349,7 @@ def test_tab_labels_keep_their_ampersand(window):
     the tabs as "Thermal _Power" and "Utilization, Clock  Fan"."""
     labels = [window.plot_tabs.tabText(i) for i in range(window.plot_tabs.count())]
 
-    assert labels == ["Thermal && Power", "Utilization, Clock && Fan"]
+    assert labels == ["Thermal && Power", "Utilization, Clock && Fan", "Loss"]
 
 
 def test_window_and_export_draw_the_same_series(window, telemetry_sample):
@@ -520,3 +521,60 @@ def test_summary_reports_time_spent_throttled(window, telemetry_sample):
     rows = _summary_rows(window)
     assert rows["Time Power-Limited (%)"] == "50"
     assert rows["Time Thermal-Limited (%)"] == "0"
+
+
+
+def test_progress_line_shows_rate_and_time_left():
+    from app.ui.main_window import format_progress
+
+    assert format_progress(10, 310, None) == "Step 10 / 310"
+    assert format_progress(10, 310, 2.0) == "Step 10 / 310 · 2.00 steps/s · ETA 2:30"
+    assert format_progress(0, 9000, 2.0).endswith("ETA 1:15:00")
+    assert format_progress(310, 310, 2.0).endswith("ETA 0:00")
+
+
+def test_charts_are_visible_and_live_during_the_run(started_run, telemetry_sample):
+    """The heavier presets run for tens of minutes; a bare progress bar told
+    nothing about what the card was doing until it was all over."""
+    assert not started_run.plot_tabs.isHidden()
+    assert started_run._live_timer.isActive()
+
+    for i in range(5):
+        started_run.update_telemetry_ui(telemetry_sample(i))
+    started_run.trainer.loss_updated.emit(1, 3.2)
+    started_run.trainer.loss_updated.emit(2, 3.0)
+    started_run._refresh_live_charts()
+
+    assert _util_plot_labels(started_run)
+    loss_lines = started_run.loss_canvas.figure.axes[0].get_lines()
+    assert list(loss_lines[0].get_ydata()) == [3.2, 3.0]
+
+
+def test_live_refresh_survives_an_empty_run(started_run):
+    started_run._refresh_live_charts()
+
+    assert not started_run.util_canvas.figure.axes
+
+
+def test_live_refresh_stops_when_the_run_ends(started_run, telemetry_sample):
+    started_run.update_telemetry_ui(telemetry_sample(0))
+    started_run.trainer.training_finished.emit({
+        "total_steps": 150, "requested_steps": 150, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 2.14,
+    })
+
+    assert not started_run._live_timer.isActive()
+
+
+def test_live_refresh_stops_when_the_run_fails(started_run):
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert not started_run._live_timer.isActive()
+
+
+def test_progress_updates_the_eta_line(started_run):
+    started_run.trainer.max_steps_ready.emit(310)
+    started_run.trainer.progress_updated.emit(1)
+
+    assert started_run.progress_bar.maximum() == 310
+    assert started_run.lbl_progress.text() == "Step 1 / 310"

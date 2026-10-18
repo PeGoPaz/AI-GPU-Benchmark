@@ -84,3 +84,20 @@ def test_unthrottled_run_draws_no_shading(telemetry_sample):
     plots.draw_utilization(ax, _df(telemetry_sample))
 
     assert not ax.patches
+
+
+
+def test_loss_plot_marks_where_timing_starts():
+    ax = Figure().add_subplot(111)
+    plots.draw_loss(ax, [1, 2, 3, 4], [3.0, 2.8, 2.7, 2.6], warmup_steps=2)
+
+    assert _labels(ax) == ["Loss", "Timing starts"]
+    assert ax.get_title() == plots.LOSS_TITLE
+
+
+def test_loss_plot_before_the_first_step_is_empty_not_an_error():
+    ax = Figure().add_subplot(111)
+    plots.draw_loss(ax, [], [], warmup_steps=10)
+
+    assert "Timing starts" not in _labels(ax)
+    assert ax.get_legend() is None

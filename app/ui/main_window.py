@@ -1,6 +1,8 @@
+import time
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -36,7 +38,24 @@ from app.core.trainer import (
 )
 from app.ui.style import STYLESHEET
 from app.utils.logger import BenchmarkLogger
-from app.utils.plots import draw_thermal_power, draw_utilization
+from app.utils.plots import draw_loss, draw_thermal_power, draw_utilization
+
+# How often the charts are redrawn while a run is in progress. Telemetry
+# arrives four times a second; redrawing that often would cost the UI thread
+# more than it shows.
+LIVE_REFRESH_MS = 1000
+
+
+def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
+    """The line under the progress bar: position, live rate and time left."""
+    text = f"Step {step} / {total}"
+    if steps_per_sec:
+        remaining = max(0, total - step) / steps_per_sec
+        minutes, seconds = divmod(int(round(remaining)), 60)
+        hours, minutes = divmod(minutes, 60)
+        eta = f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
+        text += f" · {steps_per_sec:.2f} steps/s · ETA {eta}"
+    return text
 
 
 class MainWindow(QMainWindow):
@@ -196,6 +215,9 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
 
+        self.lbl_progress = QLabel("")
+        self.lbl_progress.setObjectName("progressInfo")
+
         # Tab widget for multiple plots
         self.plot_tabs = QTabWidget()
         self.plot_tabs.setMinimumHeight(280)
@@ -210,6 +232,11 @@ class MainWindow(QMainWindow):
         util_figure = Figure(figsize=(8, 3))
         self.util_canvas = FigureCanvas(util_figure)
         self.plot_tabs.addTab(self.util_canvas, "Utilization, Clock && Fan")
+
+        # Tab 3: Loss
+        loss_figure = Figure(figsize=(8, 3))
+        self.loss_canvas = FigureCanvas(loss_figure)
+        self.plot_tabs.addTab(self.loss_canvas, "Loss")
 
         # Summary stats table
         self.summary_group = QGroupBox("Benchmark Summary")
@@ -228,6 +255,7 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(QLabel("Execution Log:"))
         right_panel.addWidget(self.console)
         right_panel.addWidget(self.progress_bar)
+        right_panel.addWidget(self.lbl_progress)
         right_panel.addWidget(self.plot_tabs, 2)
         right_panel.addWidget(self.summary_group)
 
@@ -263,6 +291,15 @@ class MainWindow(QMainWindow):
         self.telemetry.start()
 
         self.trainer = None
+
+        # Live charts: redrawn from what the logger has collected so far.
+        self._loss_steps, self._loss_values = [], []
+        self._run_warmup = 0
+        self._total_steps = 0
+        self._first_step = None             # (monotonic time, step) of the first step
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(LIVE_REFRESH_MS)
+        self._live_timer.timeout.connect(self._refresh_live_charts)
 
     def log_to_console(self, text: str):
         """Appends text to the console window."""
@@ -426,8 +463,18 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.btn_export.setEnabled(False)
         self.progress_bar.setValue(0)
-        self.plot_tabs.setVisible(False)
         self.summary_group.setVisible(False)
+        self._loss_steps, self._loss_values = [], []
+        self._first_step = None
+        self._run_warmup = self.spin_warmup.value()
+        self.lbl_progress.setText("Loading model…")
+        # Visible from the start and redrawn as data arrives: a run on the
+        # heavier presets is far too long to watch a bare progress bar.
+        for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
+            canvas.figure.clear()
+            canvas.draw()
+        self.plot_tabs.setVisible(True)
+        self._live_timer.start()
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         if self.lbl_fit.property("warning"):
             self.log_to_console(f"WARNING: {self.lbl_fit.text()}")
@@ -447,8 +494,9 @@ class MainWindow(QMainWindow):
             gradient_checkpointing=self.chk_checkpointing.isChecked(),
         )
         self.trainer.status_updated.connect(self.log_to_console)
-        self.trainer.progress_updated.connect(lambda step, loss: self.progress_bar.setValue(step))
-        self.trainer.max_steps_ready.connect(lambda steps: self.progress_bar.setRange(0, steps))
+        self.trainer.progress_updated.connect(self._on_progress)
+        self.trainer.loss_updated.connect(self._on_loss)
+        self.trainer.max_steps_ready.connect(self._on_max_steps)
         self.trainer.training_finished.connect(self.on_benchmark_finished)
         self.trainer.error_occurred.connect(self.on_benchmark_error)
         self.trainer.start()
@@ -460,8 +508,41 @@ class MainWindow(QMainWindow):
             self.trainer.stop()
         self.btn_stop.setEnabled(False)
 
+    @pyqtSlot(int)
+    def _on_max_steps(self, total: int):
+        self._total_steps = total
+        self.progress_bar.setRange(0, total)
+
+    @pyqtSlot(int)
+    def _on_progress(self, step: int):
+        """Moves the bar and recomputes rate and ETA.
+
+        The rate is measured from the first completed step, not from Start:
+        model loading can take longer than the run itself on a cold cache,
+        and counting it would make every early ETA wildly pessimistic.
+        """
+        self.progress_bar.setValue(step)
+        now = time.monotonic()
+        if self._first_step is None:
+            self._first_step = (now, step)
+        first_time, first_step = self._first_step
+        rate = (step - first_step) / (now - first_time) if now > first_time else None
+        self.lbl_progress.setText(format_progress(step, self._total_steps, rate))
+
+    @pyqtSlot(int, float)
+    def _on_loss(self, step: int, loss: float):
+        self._loss_steps.append(step)
+        self._loss_values.append(loss)
+
+    def _refresh_live_charts(self):
+        df = self.logger.to_dataframe()
+        if df is not None and len(df) >= 2:
+            self._draw_telemetry(df)
+        self._draw_loss()
+
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
+        self._live_timer.stop()
         self.btn_stop.setEnabled(False)
         df = self.logger.stop()
         if df is not None:
@@ -489,6 +570,7 @@ class MainWindow(QMainWindow):
         before this, any training failure left Start greyed out for good and
         the app had to be restarted.
         """
+        self._live_timer.stop()
         self.log_to_console(f"ERROR: {message}")
         # Close the run, or its partial telemetry leaks into the next one.
         df = self.logger.stop()
@@ -502,8 +584,7 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.btn_start.setEnabled(True)
 
-    def _render_plots(self, df, summary: dict):
-        """Draws thermal/power and utilization/clock plots into tabs."""
+    def _draw_telemetry(self, df):
         for canvas, draw in ((self.thermal_canvas, draw_thermal_power),
                              (self.util_canvas, draw_utilization)):
             figure = canvas.figure
@@ -511,6 +592,19 @@ class MainWindow(QMainWindow):
             draw(figure.add_subplot(111), df)
             figure.tight_layout()
             canvas.draw()
+
+    def _draw_loss(self):
+        figure = self.loss_canvas.figure
+        figure.clear()
+        draw_loss(figure.add_subplot(111), self._loss_steps, self._loss_values,
+                  self._run_warmup)
+        figure.tight_layout()
+        self.loss_canvas.draw()
+
+    def _render_plots(self, df, summary: dict):
+        """Final draw of all three tabs once the run is over."""
+        self._draw_telemetry(df)
+        self._draw_loss()
 
         self.plot_tabs.setVisible(True)
         self.plot_tabs.setCurrentIndex(0)
@@ -605,6 +699,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Clean up threads on exit."""
+        self._live_timer.stop()
         self.telemetry.stop()
         if self.trainer and self.trainer.isRunning():
             # Shutdown is the one place we genuinely must block, so the
