@@ -228,6 +228,20 @@ def test_every_model_declares_lora_targets():
     for spec in trainer_module.MODELS:
         assert spec.lora_targets, spec.label
         assert "/" in spec.model_id, spec.label
+        assert spec.params_b > 0, spec.label
+
+
+def test_models_are_listed_smallest_first():
+    sizes = [spec.params_b for spec in trainer_module.MODELS]
+    assert sizes == sorted(sizes)
+
+
+def test_fused_attention_model_targets_the_fused_projection():
+    """Phi-3 has no q_proj/v_proj; asking for them would attach no adapters
+    at all and train nothing while reporting a perfectly normal run."""
+    phi3 = next(s for s in trainer_module.MODELS if "Phi-3" in s.label)
+
+    assert phi3.lora_targets == ("qkv_proj",)
 
 
 # --- warm-up ------------------------------------------------------------------

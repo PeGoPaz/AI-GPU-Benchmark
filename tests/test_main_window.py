@@ -359,3 +359,12 @@ def test_window_and_export_draw_the_same_series(window, telemetry_sample):
                       for line in axes.get_lines())
 
     assert on_screen == exported
+
+
+def test_model_tooltips_name_the_checkpoint(window):
+    from PyQt6.QtCore import Qt
+
+    for i in range(window.cmb_model.count()):
+        spec = window.cmb_model.itemData(i)
+        tip = window.cmb_model.itemData(i, Qt.ItemDataRole.ToolTipRole)
+        assert spec.model_id in tip

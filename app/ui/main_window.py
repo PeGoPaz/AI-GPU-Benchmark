@@ -67,8 +67,11 @@ class MainWindow(QMainWindow):
         workload_layout = QFormLayout()
 
         self.cmb_model = QComboBox()
-        for spec in MODELS:
+        for i, spec in enumerate(MODELS):
             self.cmb_model.addItem(spec.label, spec)
+            self.cmb_model.setItemData(
+                i, f"{spec.model_id}\n{spec.params_b:.2f}B parameters",
+                Qt.ItemDataRole.ToolTipRole)
 
         self.spin_steps = QSpinBox()
         self.spin_steps.setRange(10, 5000)

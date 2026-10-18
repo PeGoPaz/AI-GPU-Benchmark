@@ -28,17 +28,29 @@ class ModelSpec:
     label: str
     model_id: str
     lora_targets: tuple[str, ...]
+    # Parameter count in billions, as published on the model card. Known up
+    # front so memory and throughput can be estimated before any download.
+    params_b: float
 
 
 # Ungated on the Hub on purpose — a gated model would fail the download with
-# an auth error rather than a message anyone can act on.
+# an auth error rather than a message anyone can act on. Listed smallest
+# first; from 3B up the weights alone outgrow an 8 GB card at 16 bits.
 MODELS = (
     ModelSpec("TinyLlama 1.1B", "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-              ("q_proj", "v_proj")),
+              ("q_proj", "v_proj"), params_b=1.10),
     ModelSpec("Qwen2.5 1.5B", "Qwen/Qwen2.5-1.5B-Instruct",
-              ("q_proj", "v_proj")),
+              ("q_proj", "v_proj"), params_b=1.54),
     ModelSpec("Phi-2 2.7B", "microsoft/phi-2",
-              ("q_proj", "v_proj")),
+              ("q_proj", "v_proj"), params_b=2.78),
+    ModelSpec("Qwen2.5 3B", "Qwen/Qwen2.5-3B-Instruct",
+              ("q_proj", "v_proj"), params_b=3.09),
+    # Phi-3 fuses query, key and value into a single projection, so there is
+    # no q_proj or v_proj to attach to — the case lora_targets exists for.
+    ModelSpec("Phi-3.5 mini 3.8B", "microsoft/Phi-3.5-mini-instruct",
+              ("qkv_proj",), params_b=3.82),
+    ModelSpec("Qwen2.5 7B", "Qwen/Qwen2.5-7B-Instruct",
+              ("q_proj", "v_proj"), params_b=7.62),
 )
 
 DEFAULT_MODEL = MODELS[0]
