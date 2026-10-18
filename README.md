@@ -99,6 +99,10 @@ Steps/sec alone does not compare across runs — a step at batch 1 and 512 token
 | Compute (est. TFLOPS) | tokens/sec × FLOPs per token, with 4N per token for LoRA on a frozen base (forward 2N, backward through activations 2N, no weight gradients) and 6N with gradient checkpointing's recompute. Attention-score FLOPs are left out, so long sequences read somewhat low |
 | Energy, timed | NVML's cumulative energy counter (Volta and newer) across the timed window — integrated on the card, so it includes the millisecond spikes a 250 ms poll misses. Older cards fall back to integrating the power samples; the label says which was used |
 | Efficiency (tokens/J) | measured tokens ÷ timed energy. Loading and warm-up are excluded on both sides of the division |
+| Peak power, instant / p99 | with the native module only: the highest and 99th-percentile reading of instantaneous power over the timed window. The 250 ms polls report a smoothed value and step over transients; this is what a PSU actually has to survive |
+| Transient ratio | instant peak ÷ instant mean — how far the spikes rise above the steady draw |
+| Native sampling | samples per second, and how many of them were new readings. NVML refreshes less often than it can be asked, so the second number is the trace's real resolution — reported rather than assumed |
+| Energy, instant trace | the trace integrated over the timed window: a cross-check on the card's energy counter |
 
 The timer does not start with the run. Warm-up steps (10 by default) are executed first and excluded from the measurement, because the opening steps carry lazy weight loading and CUDA kernel compilation — real work, but not the steady-state rate the benchmark is trying to report. Stopping during warm-up reports no throughput at all rather than a number derived from the warm-up itself.
 
@@ -187,7 +191,7 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 pip install ./native
 ```
 
-That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML reachable, the telemetry thread starts it alongside its own polling, drains it on every 250 ms poll, and the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`. The window and the headless run both say in one line at start-up whether native sampling is active, and if not, why: module not built, no driver, or a card without a power reading. In every one of those cases telemetry carries on exactly as before. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
+That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML reachable, the Thermal & Power chart draws instantaneous power faintly behind the 250 ms polls (thinned to a min/max envelope for drawing, so single-sample spikes survive), the summary gains the transient rows above, and export adds `logs/power_<timestamp>.csv` with every sample. The telemetry thread starts it alongside its own polling, drains it on every 250 ms poll, and the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`. The window and the headless run both say in one line at start-up whether native sampling is active, and if not, why: module not built, no driver, or a card without a power reading. In every one of those cases telemetry carries on exactly as before. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
 
 ---
 

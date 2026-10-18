@@ -64,3 +64,27 @@ def test_report_without_a_gpu_reading_is_still_valid(telemetry_sample):
     r = report.build_report(_df(telemetry_sample), SUMMARY, device=None)
 
     assert r["gpu"] == {}
+
+
+
+def test_report_records_how_power_was_sampled(telemetry_sample):
+    import numpy as np
+    t = 101.0 + np.arange(1000) * 0.002
+    trace = pd.DataFrame({"timestamp": t, "time_sec": t - 100.0,
+                          "power_w": np.where(np.arange(1000) % 50 == 0, 300.0, 200.0)})
+    status = {"active": True, "detail": "instant power (NVML_FI_DEV_POWER_INSTANT)",
+              "interval_us": 2000}
+
+    r = report.build_report(_df(telemetry_sample), SUMMARY, DEVICE, trace=trace, sampler=status)
+
+    assert r["power_sampler"] == status
+    assert r["results"]["native_peak_power_w"] == 300.0
+    assert json.loads(json.dumps(r)) == r
+
+
+def test_report_without_the_native_sampler_says_so(telemetry_sample):
+    r = report.build_report(_df(telemetry_sample), SUMMARY,
+                            sampler={"active": False, "detail": "native module not built"})
+
+    assert r["power_sampler"]["active"] is False
+    assert r["results"]["native_peak_power_w"] is None

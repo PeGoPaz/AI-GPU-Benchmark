@@ -19,7 +19,7 @@ REPORT_SCHEMA_VERSION = 1
 # a result. Read from package metadata rather than by importing: torch would
 # cost seconds to import here, and a missing package is simply null.
 _TRACKED_PACKAGES = ("torch", "transformers", "peft", "bitsandbytes", "datasets",
-                     "nvidia-ml-py", "PyQt6")
+                     "nvidia-ml-py", "PyQt6", "ai-gpu-benchmark-native")
 
 _WORKLOAD_KEYS = ("model", "model_id", "precision", "batch_size", "seq_len",
                   "gradient_checkpointing", "warmup_steps", "requested_steps",
@@ -39,8 +39,13 @@ def package_versions() -> dict[str, str | None]:
 
 
 def build_report(df, summary: dict, device: dict | None = None,
-                 loss: tuple[list[int], list[float]] | None = None) -> dict:
-    """Assembles the report for a finished run. File paths are added on export."""
+                 loss: tuple[list[int], list[float]] | None = None,
+                 trace=None, sampler: dict | None = None) -> dict:
+    """Assembles the report for a finished run. File paths are added on export.
+
+    `sampler` is the telemetry thread's description of how power was sampled;
+    the transient figures it enables land in results alongside the rest.
+    """
     steps, values = loss if loss is not None else ([], [])
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -54,8 +59,9 @@ def build_report(df, summary: dict, device: dict | None = None,
         "workload": {key: summary.get(key) for key in _WORKLOAD_KEYS},
         "results": {
             **{key: summary.get(key) for key in _RESULT_KEYS},
-            **compute_stats(df, summary),
+            **compute_stats(df, summary, trace),
         },
+        "power_sampler": sampler or {"active": False, "detail": "unknown"},
         "loss": {"steps": list(steps), "values": list(values)},
         "files": {},
     }

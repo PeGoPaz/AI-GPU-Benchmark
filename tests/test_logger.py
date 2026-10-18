@@ -59,9 +59,11 @@ def test_to_dataframe_is_repeatable_and_read_only(telemetry_sample):
 
 def test_export_writes_csv_and_png(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, png_path, report_path = BenchmarkLogger.export(df, output_dir=str(tmp_path))
+    csv_path, png_path, report_path, trace_path = BenchmarkLogger.export(
+        df, output_dir=str(tmp_path))
 
     assert report_path is None                  # no report asked for
+    assert trace_path is None                   # no native trace either
     assert os.path.getsize(csv_path) > 0
     assert os.path.getsize(png_path) > 0
     assert csv_path.endswith(".csv")
@@ -70,7 +72,7 @@ def test_export_writes_csv_and_png(telemetry_sample, tmp_path):
 
 def test_export_csv_contains_telemetry_columns(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, _, _ = BenchmarkLogger.export(df, output_dir=str(tmp_path))
+    csv_path = BenchmarkLogger.export(df, output_dir=str(tmp_path)).csv
 
     header = open(csv_path).readline()
     for column in ("temp_gpu", "temp_memory", "temp_headroom_c", "power_w", "time_sec"):
@@ -84,7 +86,7 @@ def test_exported_plot_survives_a_card_without_fans(telemetry_sample, tmp_path):
     for i in range(5):
         lg.log(telemetry_sample(i, fan_speed_pct=None, fan_rpm=None))
 
-    _, png_path, _ = BenchmarkLogger.export(lg.stop(), output_dir=str(tmp_path))
+    png_path = BenchmarkLogger.export(lg.stop(), output_dir=str(tmp_path)).plot
 
     assert os.path.getsize(png_path) > 0
 
@@ -92,7 +94,7 @@ def test_exported_plot_survives_a_card_without_fans(telemetry_sample, tmp_path):
 
 def test_report_is_written_beside_the_files_it_describes(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, png_path, report_path = BenchmarkLogger.export(
+    csv_path, png_path, report_path, _ = BenchmarkLogger.export(
         df, output_dir=str(tmp_path), report={"schema_version": 1, "files": {}})
 
     with open(report_path, encoding="utf-8") as f:
@@ -138,3 +140,20 @@ def test_new_run_starts_without_the_old_trace(telemetry_sample):
     lg.start()
 
     assert lg.power_trace() is None
+
+
+
+def test_export_writes_the_trace_beside_the_telemetry(telemetry_sample, tmp_path):
+    lg = _filled(telemetry_sample)
+    lg.log_power_trace(_chunk(100.5, 50, watts=275.0))
+    df = lg.stop()
+
+    paths = BenchmarkLogger.export(df, output_dir=str(tmp_path),
+                                   report={"schema_version": 1, "files": {}},
+                                   trace=lg.power_trace())
+
+    assert os.path.basename(paths.power_trace).startswith("power_")
+    header = open(paths.power_trace).readline().strip()
+    assert header == "timestamp,power_w,time_sec"
+    with open(paths.report, encoding="utf-8") as f:
+        assert json.load(f)["files"]["power_trace"] == os.path.basename(paths.power_trace)

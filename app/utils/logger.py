@@ -1,11 +1,19 @@
 import json
 import os
 from datetime import datetime
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 
 from app.utils.plots import build_report_figure
+
+
+class ExportPaths(NamedTuple):
+    csv: str
+    plot: str
+    report: str | None = None
+    power_trace: str | None = None   # only with the native sampler
 
 
 class BenchmarkLogger:
@@ -75,14 +83,15 @@ class BenchmarkLogger:
 
     @staticmethod
     def export(df: pd.DataFrame, output_dir: str = "logs",
-               report: dict | None = None) -> tuple[str, str, str | None]:
+               report: dict | None = None,
+               trace: pd.DataFrame | None = None) -> ExportPaths:
         """Writes the collected telemetry to CSV and generates a plot PNG.
 
         With a report (see app.utils.report), also writes it as JSON beside
-        them, pointing at both files. A run that failed has no summary to
-        report, so its telemetry is still exportable without one.
-
-        Returns (csv_path, plot_path, report_path or None).
+        them, pointing at the other files. A run that failed has no summary
+        to report, so its telemetry is still exportable without one. With the
+        native sampler's trace, that goes into a CSV of its own — at 500 Hz
+        it has thousands of rows for every one of the telemetry CSV's.
         """
         os.makedirs(output_dir, exist_ok=True)
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -90,18 +99,25 @@ class BenchmarkLogger:
         plot_path = os.path.join(output_dir, f"plot_{timestamp_str}.png")
 
         df.to_csv(csv_path, index=False)
-        BenchmarkLogger._generate_plot(df, plot_path)
+        BenchmarkLogger._generate_plot(df, plot_path, trace)
+
+        trace_path = None
+        if trace is not None and len(trace):
+            trace_path = os.path.join(output_dir, f"power_{timestamp_str}.csv")
+            trace.to_csv(trace_path, index=False)
 
         report_path = None
         if report is not None:
             report_path = os.path.join(output_dir, f"report_{timestamp_str}.json")
-            report = {**report, "files": {"csv": os.path.basename(csv_path),
-                                          "plot": os.path.basename(plot_path)}}
+            files = {"csv": os.path.basename(csv_path), "plot": os.path.basename(plot_path)}
+            if trace_path:
+                files["power_trace"] = os.path.basename(trace_path)
+            report = {**report, "files": files}
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
 
-        return csv_path, plot_path, report_path
+        return ExportPaths(csv_path, plot_path, report_path, trace_path)
 
     @staticmethod
-    def _generate_plot(df, save_path):
-        build_report_figure(df).savefig(save_path, dpi=300)
+    def _generate_plot(df, save_path, trace=None):
+        build_report_figure(df, trace).savefig(save_path, dpi=300)

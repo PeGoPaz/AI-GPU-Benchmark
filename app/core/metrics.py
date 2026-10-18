@@ -8,6 +8,7 @@ Steps/sec on its own is not comparable between runs: a step at batch 1 and
 512 tokens is an eighth of the work of one at batch 2 and 2048. Tokens/sec
 normalises that, and the energy figures say what the throughput cost.
 """
+import numpy as np
 import pandas as pd
 
 from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
@@ -50,9 +51,7 @@ def energy_joules(df: pd.DataFrame) -> tuple[float | None, str | None]:
             return (counter.iloc[-1] - counter.iloc[0]) / 1000.0, "counter"
 
     if len(df) >= 2:
-        t = df['timestamp'].to_numpy(dtype=float)
-        p = df['power_w'].to_numpy(dtype=float)
-        return float(((p[1:] + p[:-1]) / 2 * (t[1:] - t[:-1])).sum()), "power samples"
+        return trapezoid_joules(df['timestamp'], df['power_w']), "power samples"
 
     return None, None
 
@@ -67,6 +66,44 @@ def limited_share(df: pd.DataFrame, bits: int) -> float | None:
     return float((masks.astype('int64') & bits).astype(bool).mean() * 100)
 
 
+def trapezoid_joules(timestamps, watts) -> float:
+    """Energy under a power curve sampled at arbitrary times."""
+    t = np.asarray(timestamps, dtype=float)
+    p = np.asarray(watts, dtype=float)
+    if len(t) < 2:
+        return 0.0
+    return float(((p[1:] + p[:-1]) / 2 * (t[1:] - t[:-1])).sum())
+
+
+def transient_stats(trace: pd.DataFrame | None) -> dict:
+    """What the native sampler's trace shows that the 250 ms polls cannot.
+
+    The peak and p99 of instantaneous power, how far the peak sits above the
+    mean, the rate samples arrived at, and the rate the reading actually
+    changed at — NVML refreshes less often than it can be asked, so the
+    second number, not the first, is the trace's real resolution. Energy
+    from the trace is a cross-check on the card's own counter.
+    """
+    empty = dict.fromkeys(('native_peak_power_w', 'native_p99_power_w', 'transient_ratio',
+                           'native_sample_hz', 'native_update_hz', 'energy_trace_j'))
+    if trace is None or len(trace) < 2:
+        return empty
+
+    watts = trace['power_w'].to_numpy(dtype=float)
+    seconds = trace['timestamp'].to_numpy(dtype=float)
+    duration = seconds[-1] - seconds[0]
+    mean = watts.mean()
+    return {
+        'native_peak_power_w': float(watts.max()),
+        'native_p99_power_w': float(np.percentile(watts, 99)),
+        'transient_ratio': float(watts.max() / mean) if mean > 0 else None,
+        'native_sample_hz': (len(watts) - 1) / duration if duration > 0 else None,
+        'native_update_hz': (float(np.count_nonzero(np.diff(watts))) / duration
+                             if duration > 0 else None),
+        'energy_trace_j': trapezoid_joules(seconds, watts),
+    }
+
+
 def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     """max/min/mean of an optional column, None when it was never reported."""
     if column not in df.columns or not df[column].notna().any():
@@ -74,12 +111,14 @@ def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     return float(getattr(df[column], how)())
 
 
-def compute_stats(df: pd.DataFrame, summary: dict) -> dict:
+def compute_stats(df: pd.DataFrame, summary: dict,
+                  trace: pd.DataFrame | None = None) -> dict:
     """Everything the summary table shows, as numbers.
 
     Optional readings (memory temperature, fan, PCIe) come back as None on
     hardware that does not report them, and so do the throughput figures when
-    the summary predates them or the timed window never opened.
+    the summary predates them or the timed window never opened. The
+    transient figures need the native sampler's trace and are None without it.
     """
     stats: dict = {
         'avg_temp_c': float(df['temp_gpu'].mean()),
@@ -109,6 +148,15 @@ def compute_stats(df: pd.DataFrame, summary: dict) -> dict:
     throttle_rows = window if len(window) else df
     stats['power_limited_pct'] = limited_share(throttle_rows, POWER_LIMIT_BITS)
     stats['thermal_limited_pct'] = limited_share(throttle_rows, THERMAL_LIMIT_BITS)
+
+    # The same window for the trace: loading draws little and would only
+    # pull the mean down and the transient ratio up.
+    if trace is not None:
+        trace_window = timed_window(trace, summary.get('measure_start'),
+                                    summary.get('measure_end'))
+        stats.update(transient_stats(trace_window if len(trace_window) else trace))
+    else:
+        stats.update(transient_stats(None))
 
     tokens_per_step = summary.get('tokens_per_step')
     elapsed = summary.get('elapsed_time_sec') or 0.0

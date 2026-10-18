@@ -101,3 +101,51 @@ def test_loss_plot_before_the_first_step_is_empty_not_an_error():
 
     assert "Timing starts" not in _labels(ax)
     assert ax.get_legend() is None
+
+
+
+# --- native power trace ------------------------------------------------------------
+
+def test_envelope_keeps_a_single_sample_spike():
+    """Every-n-th decimation would drop the one sample the trace exists for."""
+    import numpy as np
+    y = np.full(100_000, 200.0)
+    y[54_321] = 450.0
+    x = np.arange(len(y))
+
+    ex, ey = plots.envelope(x, y, max_points=1000)
+
+    assert len(ey) <= 1000
+    assert ey.max() == 450.0
+    assert list(ex) == sorted(ex)
+
+
+def test_short_trace_is_drawn_as_is():
+    import numpy as np
+    x, y = np.arange(10), np.arange(10.0)
+
+    ex, ey = plots.envelope(x, y)
+
+    assert list(ey) == list(y)
+
+
+def test_instant_power_is_drawn_behind_the_polls(telemetry_sample):
+    import numpy as np
+    df = _df(telemetry_sample)
+    t = np.linspace(0, 4, 2000)
+    trace = pd.DataFrame({"time_sec": t, "timestamp": 100 + t, "power_w": 250 + 50 * np.sin(t * 40)})
+    ax = Figure().add_subplot(111)
+
+    twin = plots.draw_thermal_power(ax, df, trace)
+
+    assert _labels(twin) == ["Power, instant (W)", "Power Draw (W)"]
+
+
+def test_report_figure_takes_the_trace_too(telemetry_sample):
+    import numpy as np
+    t = np.linspace(0, 4, 50)
+    trace = pd.DataFrame({"time_sec": t, "timestamp": 100 + t, "power_w": np.full(50, 260.0)})
+
+    fig = plots.build_report_figure(_df(telemetry_sample), trace)
+
+    assert "Power, instant (W)" in [line.get_label() for ax in fig.axes for line in ax.get_lines()]

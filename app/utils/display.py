@@ -40,9 +40,9 @@ def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
     return text
 
 
-def summary_rows(df, summary: dict) -> list[tuple[str, str]]:
+def summary_rows(df, summary: dict, trace=None) -> list[tuple[str, str]]:
     """The summary table as (metric, value) pairs, ready to display."""
-    stats = compute_stats(df, summary)
+    stats = compute_stats(df, summary, trace)
 
     steps_label = f"{summary['total_steps']}"
     if summary.get('aborted'):
@@ -80,6 +80,24 @@ def summary_rows(df, summary: dict) -> list[tuple[str, str]]:
         ("Max Temp (°C)", f"{stats['max_temp_c']:.0f}"),
         ("Avg Power (W)", f"{stats['avg_power_w']:.1f}"),
         ("Peak Power (W)", f"{stats['peak_power_w']:.1f}"),
+    ]
+
+    # From the native sampler only: what the 250 ms polls cannot see.
+    if stats['native_peak_power_w'] is not None:
+        metrics += [
+            ("Peak Power, instant (W)", f"{stats['native_peak_power_w']:.1f}"),
+            ("Power p99, instant (W)", f"{stats['native_p99_power_w']:.1f}"),
+        ]
+        if stats['transient_ratio'] is not None:
+            metrics.append(("Transient Ratio (peak / mean)", f"{stats['transient_ratio']:.2f}×"))
+        if stats['native_sample_hz'] is not None:
+            metrics.append(("Native Sampling (Hz)",
+                            f"{stats['native_sample_hz']:.0f}, "
+                            f"{stats['native_update_hz']:.0f} new readings/s"))
+        if stats['energy_j'] is not None and stats['energy_trace_j']:
+            metrics.append(("Energy, instant trace (kJ)", f"{stats['energy_trace_j'] / 1000:.2f}"))
+
+    metrics += [
         ("Avg VRAM (MiB)", f"{stats['avg_vram_mb']:.1f}"),
         ("Peak VRAM (MiB)", f"{stats['peak_vram_mb']:.1f}"),
     ]

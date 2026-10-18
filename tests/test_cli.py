@@ -20,6 +20,7 @@ class FakeTelemetry(QObject):
     sampler_status = pyqtSignal(dict)
     samples: list = []
     status = {"active": False, "detail": "native module not built"}
+    trace = None      # a (seconds, watts) chunk to emit, when a test wants one
 
     def __init__(self, interval_ms=250, parent=None):
         super().__init__(parent)
@@ -32,6 +33,8 @@ class FakeTelemetry(QObject):
         self.sampler_status.emit(self.status)
         for sample in self.samples:
             self.data_updated.emit(sample)
+        if self.trace is not None:
+            self.power_trace.emit(self.trace)
 
     def stop(self):
         self.stopped = True
@@ -272,3 +275,22 @@ def test_active_sampler_is_described_with_its_rate(tmp_path, telemetry_sample, m
     _, _, out = _run(tmp_path, telemetry_sample)
 
     assert "Power sampler: native, instant power, every 2 ms" in out
+
+
+
+def test_native_trace_reaches_the_summary_and_the_export(tmp_path, telemetry_sample,
+                                                          monkeypatch):
+    import numpy as np
+    t = 101.0 + np.arange(500) * 0.002
+    monkeypatch.setattr(FakeTelemetry, "trace",
+                        (t, np.where(np.arange(500) % 50 == 0, 310.0, 205.0)))
+    monkeypatch.setattr(FakeTelemetry, "status",
+                        {"active": True, "detail": "instant power", "interval_us": 2000})
+
+    _, codes, out = _run(tmp_path, telemetry_sample)
+
+    assert codes == [0]
+    assert "Peak Power, instant (W)" in out and "310.0" in out
+    assert any(tmp_path.glob("power_*.csv"))
+    [report] = tmp_path.glob("report_*.json")
+    assert json.loads(report.read_text(encoding="utf-8"))["power_sampler"]["active"] is True

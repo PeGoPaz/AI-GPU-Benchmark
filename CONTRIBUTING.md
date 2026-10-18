@@ -66,11 +66,13 @@ Everything here reads the JSON run report (`report_<timestamp>.json`), so it wor
 - **Run comparison.** Load two or more reports and show them side by side: tokens/sec, est. TFLOPS, tokens/J, time power- and thermal-limited. The report names its CSV, so the curves of a previous run can be drawn behind the current ones as well.
 - **A results table from real cards.** Run the four presets headless on a handful of rented cloud GPUs and publish the reports with a table in the README. Numbers from actual hardware are worth more than any feature on this list.
 
-### 3. Native power sampler (C++)
+### 3. The native module
 
-Telemetry is polled from Python every 250 ms. That is fine for temperatures and clocks, but power on modern cards moves in milliseconds, and a 250 ms poll steps right over the transients — `nvmlDeviceGetPowerUsage` is itself a smoothed reading on recent drivers. The energy counter already covers the total; what is missing is the shape: the peak a PSU actually has to survive.
+The C++ power sampler in `native/` is built, tested and wired in; what is left are the edges.
 
-A small C++ extension (pybind11, built with scikit-build-core) running its own thread outside the GIL, reading the instantaneous power field (`NVML_FI_DEV_POWER_INSTANT`) every 1–10 ms into a ring buffer, and handing Python batches of `(timestamp, mW)` once per poll. `TelemetryWorker` keeps everything else; the sampler only adds a high-rate power series and a true peak. It must degrade to the current behaviour when the extension is not built, and the tests must stay hardware-free — the NVML calls belong behind an interface the tests can replace.
+- **Windows.** The loader only knows `dlopen`. Windows needs `LoadLibrary` with the two places pynvml looks for `nvml.dll` (System32 for DCH drivers, `NVIDIA Corporation\NVSMI` under Program Files for older ones), and an MSVC job in the CI matrix — the warning flags in `native/CMakeLists.txt` are GCC/Clang spellings today.
+- **Per-step power.** The trace is fine-grained enough to attribute energy to individual optimizer steps, if the trainer stamps each step boundary. That would show whether the transients come from the forward pass, the backward pass or the optimizer, and give a joules-per-step distribution rather than one average.
+- **Wheels.** `pip install ./native` compiles on the spot. cibuildwheel in CI could publish prebuilt Linux wheels, so a cloud GPU box needs no compiler at all.
 
 ### 4. Inference benchmark
 

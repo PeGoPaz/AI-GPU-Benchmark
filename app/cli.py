@@ -272,16 +272,18 @@ class HeadlessRun(QObject):
             self._finish(1)
             return
 
-        rows = summary_rows(df, summary)
+        trace = self.logger.power_trace()
+        rows = summary_rows(df, summary, trace)
         width = max(len(metric) for metric, _ in rows)
         self._print("\n=== Benchmark Summary ===")
         for metric, value in rows:
             self._print(f"{metric:<{width}}  {value}")
 
         report = build_report(df, summary, self._device,
-                              (self._loss_steps, self._loss_values))
+                              (self._loss_steps, self._loss_values),
+                              trace, self._sampler_status)
         try:
-            paths = BenchmarkLogger.export(df, self.output_dir, report=report)
+            paths = BenchmarkLogger.export(df, self.output_dir, report=report, trace=trace)
         except OSError as e:
             self._print(f"\nExport failed: {e}")
             self._finish(1)

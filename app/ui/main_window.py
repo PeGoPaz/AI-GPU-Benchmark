@@ -705,11 +705,12 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(True)
 
     def _draw_telemetry(self, df):
-        for canvas, draw in ((self.thermal_canvas, draw_thermal_power),
-                             (self.util_canvas, draw_utilization)):
+        trace = self.logger.power_trace()
+        for canvas, draw in ((self.thermal_canvas, lambda ax: draw_thermal_power(ax, df, trace)),
+                             (self.util_canvas, lambda ax: draw_utilization(ax, df))):
             figure = canvas.figure
             figure.clear()
-            draw(figure.add_subplot(111), df)
+            draw(figure.add_subplot(111))
             figure.tight_layout()
             self._theme_canvas(canvas)
 
@@ -735,7 +736,7 @@ class MainWindow(QMainWindow):
 
     def _render_summary(self, df, summary: dict):
         """Populates the summary table with computed benchmark metrics."""
-        metrics = summary_rows(df, summary)
+        metrics = summary_rows(df, summary, self.logger.power_trace())
 
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):
@@ -754,16 +755,18 @@ class MainWindow(QMainWindow):
         if df is None:
             self.log_to_console("No data to export.")
             return
+        trace = self.logger.power_trace()
         report = None
         if self._last_summary is not None:
             report = build_report(df, self._last_summary, self._device_info,
-                                  (self._loss_steps, self._loss_values))
+                                  (self._loss_steps, self._loss_values),
+                                  trace, self._sampler_status)
         try:
-            csv_path, plot_path, report_path = BenchmarkLogger.export(df, report=report)
+            paths = BenchmarkLogger.export(df, report=report, trace=trace)
         except OSError as e:
             self.log_to_console(f"Export failed: {e}")
             return
-        for path in (csv_path, plot_path, report_path):
+        for path in paths:
             if path:
                 self.log_to_console(f"Exported: {path}")
 

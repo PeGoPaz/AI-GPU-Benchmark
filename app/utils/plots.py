@@ -7,6 +7,7 @@ axes it is handed, which leaves figure layout (two tabs on screen, two stacked
 panels on disk) as the only thing the callers still decide.
 """
 import matplotlib.colors as mcolors
+import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -70,8 +71,31 @@ def _shade_throttling(ax: Axes, df) -> None:
                        label=label if i == 0 else None)
 
 
-def draw_thermal_power(ax: Axes, df) -> Axes:
-    """GPU temperature on the left axis, power draw on a twin. Returns the twin."""
+def envelope(x, y, max_points: int = 4000):
+    """Thins a long trace for drawing without losing its extremes.
+
+    Plain decimation (every n-th point) would drop exactly the one-sample
+    spikes the native trace exists to show. Each bucket keeps its minimum
+    and its maximum instead, in time order, so the drawn envelope is the
+    same at any zoom a window can show.
+    """
+    x, y = np.asarray(x), np.asarray(y)
+    if len(y) <= max_points:
+        return x, y
+    edges = np.linspace(0, len(y), max_points // 2 + 1, dtype=int)
+    keep = []
+    for start, end in zip(edges[:-1], edges[1:], strict=True):
+        segment = y[start:end]
+        keep.extend(sorted({start + int(segment.argmin()), start + int(segment.argmax())}))
+    return x[keep], y[keep]
+
+
+def draw_thermal_power(ax: Axes, df, trace=None) -> Axes:
+    """GPU temperature on the left axis, power draw on a twin. Returns the twin.
+
+    With the native sampler's trace, instantaneous power is drawn faintly
+    behind the 250 ms polls — the gap between the two is the point.
+    """
     ax.plot(df['time_sec'], df['temp_gpu'], color=TEMP_COLOR,
             label='GPU Temp (°C)', linewidth=2)
     ax.set_xlabel('Time (seconds)')
@@ -80,6 +104,10 @@ def draw_thermal_power(ax: Axes, df) -> Axes:
     ax.set_title(THERMAL_TITLE)
 
     twin = ax.twinx()
+    if trace is not None and len(trace):
+        t, w = envelope(trace['time_sec'], trace['power_w'])
+        twin.plot(t, w, color=POWER_COLOR, alpha=0.4, linewidth=0.7,
+                  label='Power, instant (W)')
     twin.plot(df['time_sec'], df['power_w'], color=POWER_COLOR,
               label='Power Draw (W)', linewidth=2, linestyle='--')
     twin.set_ylabel('Power (W)', color=POWER_COLOR)
@@ -180,7 +208,7 @@ def apply_chart_theme(fig: Figure, background: str, foreground: str,
                 text.set_color(foreground)
 
 
-def build_report_figure(df) -> Figure:
+def build_report_figure(df, trace=None) -> Figure:
     """Both panels stacked, as written to the exported PNG.
 
     A bare Figure rather than pyplot: pyplot keeps a global registry of open
@@ -189,7 +217,7 @@ def build_report_figure(df) -> Figure:
     """
     fig = Figure(figsize=(10, 7))
     top, bottom = fig.subplots(2, 1)
-    draw_thermal_power(top, df)
+    draw_thermal_power(top, df, trace)
     draw_utilization(bottom, df)
     fig.tight_layout()
     return fig

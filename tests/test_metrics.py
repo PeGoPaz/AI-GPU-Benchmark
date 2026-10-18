@@ -125,3 +125,53 @@ def test_driver_without_throttle_reasons_reports_none(telemetry_sample):
     stats = metrics.compute_stats(_df(telemetry_sample, throttle_reasons=None), _summary())
 
     assert stats["power_limited_pct"] is None
+
+
+
+# --- native power trace ------------------------------------------------------------
+
+def _trace(start=100.0, n=2001, step=0.002, base=200.0, spike_every=100, spike=320.0):
+    """A 500 Hz trace sitting at `base` watts with a one-sample spike every 200 ms."""
+    import numpy as np
+    t = start + np.arange(n) * step
+    w = np.full(n, base)
+    w[::spike_every] = spike
+    return pd.DataFrame({"timestamp": t, "power_w": w, "time_sec": t - start})
+
+
+def test_transients_show_what_the_polls_average_away():
+    stats = metrics.transient_stats(_trace())
+
+    assert stats["native_peak_power_w"] == 320.0
+    assert stats["native_p99_power_w"] == pytest.approx(320.0)     # 1 % of samples are spikes
+    assert stats["transient_ratio"] == pytest.approx(320.0 / (200.0 + 120.0 / 100), rel=1e-3)
+
+
+def test_update_rate_counts_changes_not_reads():
+    """Up, then back down, at every spike: 2 changes per 200 ms is 10 Hz,
+    however many times the sampler asked in between."""
+    stats = metrics.transient_stats(_trace())
+
+    assert stats["native_sample_hz"] == pytest.approx(500.0)
+    assert stats["native_update_hz"] == pytest.approx(10.0, rel=0.01)
+
+
+def test_trace_energy_matches_the_area_under_the_curve():
+    flat = _trace(spike=200.0)                   # 200 W for 4 s
+
+    assert metrics.transient_stats(flat)["energy_trace_j"] == pytest.approx(800.0)
+
+
+def test_trace_figures_cover_the_timed_window(telemetry_sample):
+    stats = metrics.compute_stats(_df(telemetry_sample), _summary(measure_start=102.0,
+                                                                  measure_end=104.0),
+                                  trace=_trace(start=100.0, n=2501))
+
+    assert stats["energy_trace_j"] == pytest.approx(2.0 * (200.0 + 1.2), rel=0.01)
+
+
+def test_no_trace_means_no_transient_figures(telemetry_sample):
+    stats = metrics.compute_stats(_df(telemetry_sample), _summary())
+
+    assert stats["native_peak_power_w"] is None
+    assert stats["native_update_hz"] is None

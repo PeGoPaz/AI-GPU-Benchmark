@@ -766,3 +766,31 @@ def test_power_trace_is_collected_during_a_run(started_run, telemetry_sample):
                                  np.array([200.0, 300.0], dtype=np.float32)))
 
     assert len(started_run.logger.power_trace()) == 2
+
+
+
+def test_summary_shows_transients_when_the_trace_exists(window, telemetry_sample):
+    import numpy as np
+
+    window.logger.start()
+    for i in range(5):
+        window.logger.log(telemetry_sample(i))
+    t = 100.0 + np.arange(1500) * 0.002
+    w = np.where(np.arange(1500) % 100 == 0, 330.0, 240.0).astype(np.float32)
+    window._on_power_trace((t, w))
+    _finish = {"total_steps": 150, "requested_steps": 150, "aborted": False,
+               "elapsed_time_sec": 70.0, "steps_per_sec": 2.14}
+    window.on_benchmark_finished(_finish)
+
+    rows = _summary_rows(window)
+    assert rows["Peak Power, instant (W)"] == "330.0"
+    assert rows["Native Sampling (Hz)"].startswith("500, ")
+    thermal_labels = [line.get_label() for ax in window.thermal_canvas.figure.axes
+                      for line in ax.get_lines()]
+    assert "Power, instant (W)" in thermal_labels
+
+
+def test_summary_without_a_trace_has_no_transient_rows(window, telemetry_sample):
+    _finish_run(window, telemetry_sample)
+
+    assert "Peak Power, instant (W)" not in _summary_rows(window)
