@@ -1,0 +1,25 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "ai-gpu-benchmark-native"
+description = "Optional C++ power sampler for AI-GPU-Benchmark"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+[tool.scikit-build]
+cmake.version = ">=3.25"
+cmake.build-type = "Release"
+# Rebuilds in place reuse this instead of starting from scratch every time.
+build-dir = "build/{wheel_tag}"
+
+[tool.scikit-build.cmake.define]
+POWER_BUILD_PYTHON = "ON"
+
+# One version, kept in CMakeLists.txt.
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "CMakeLists.txt"
+regex = 'project\(nvml_sampler VERSION (?P<value>[0-9.]+)'

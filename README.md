@@ -141,6 +141,7 @@ app/
     plots.py                   — chart panels shared by the window's tabs and the exported PNG
     report.py                  — the versioned JSON run report written on export
     display.py                 — summary rows and the progress line, shared by window and CLI
+native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff lint, plus tests on Python 3.10 and 3.13
 pytest.ini                     — pytest configuration
@@ -176,6 +177,16 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
 `requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
+
+### Native module (optional)
+
+`native/` holds the project's C++ part, a power sampler built as a Python extension with CMake, pybind11 and scikit-build-core. The app never requires it — everything above works without it — and it is built with one command:
+
+```bash
+pip install ./native
+```
+
+That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. Its tests (`tests/test_native_sampler.py`) skip themselves unless the module is installed, so the regular suite stays a pure-Python install.
 
 ---
 

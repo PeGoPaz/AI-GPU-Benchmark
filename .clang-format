@@ -1,0 +1,9 @@
+# C++ style for native/. Checked in CI with a pinned clang-format, for the
+# same reason ruff is pinned: defaults move between releases.
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -2
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Preserve

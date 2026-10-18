@@ -10,6 +10,12 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
+# Native module builds
+native/build/
+build/
+*.so
+*.dylib
+
 # Benchmark output
 logs/
 results/
