@@ -16,6 +16,16 @@ The module neither links against `libnvidia-ml` nor includes `nvml.h`; it opens 
 
 The tests build a fake `libnvidia-ml` (`tests/fake_nvml.cpp`) and load it by path through the same code, covering a missing library, a failed `nvmlInit`, a missing entry point and the actual readings, all without a GPU.
 
+## How the sampler works
+
+`power::Sampler` owns one thread that reads a `PowerSource` at a fixed cadence (2 ms by default) and pushes `(unix_ns, milliwatts)` into the ring buffer below; Python drains it once per telemetry poll.
+
+- **Which reading.** `NvmlPowerSource` asks for `NVML_FI_DEV_POWER_INSTANT`, the board's power right now. Where the driver does not support that field it falls back to `nvmlDeviceGetPowerUsage` — smoothed on recent drivers, but available wherever power is reported — and says which one it used.
+- **Cadence.** Deadlines advance on the steady clock, so the rate does not drift by however long each read takes. A read that overruns whole intervals skips those slots instead of making them up with a burst of back-to-back reads, which would only cluster samples around the stall.
+- **Stamps.** Each sample is stamped with the wall clock, so it lines up with the `time.time()` stamps of the Python telemetry rows.
+- **Stopping.** The thread sleeps on a condition variable rather than in `sleep_until`, so `stop()` wakes it immediately even with a long interval; the read itself happens outside the lock, so `stop()` never waits on the driver.
+- **Honest rate.** The driver refreshes its reading less often than it can be asked. Besides reads, errors and drops, the sampler counts *changes* — reads whose value differed from the previous one — which is the rate at which new information actually arrived, and what the report shows.
+
 ## C++ tests
 
 The sampler core is plain C++ and is tested without Python, using GoogleTest (fetched and pinned by CMake):

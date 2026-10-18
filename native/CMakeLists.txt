@@ -40,11 +40,13 @@ target_compile_options(power_warnings INTERFACE
 
 # The sampler itself: plain C++, no Python. Both the module and the tests
 # link it, which is what keeps it testable without an interpreter.
-add_library(power_core STATIC src/nvml_api.cpp)
+find_package(Threads REQUIRED)
+
+add_library(power_core STATIC src/nvml_api.cpp src/sampler.cpp)
 target_include_directories(power_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(power_core PUBLIC cxx_std_17)
 # dlopen lives in libdl on glibc older than 2.34; empty where it is in libc.
-target_link_libraries(power_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE power_warnings)
+target_link_libraries(power_core PUBLIC ${CMAKE_DL_LIBS} Threads::Threads PRIVATE power_warnings)
 
 if(POWER_BUILD_PYTHON)
     find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
@@ -85,7 +87,8 @@ if(BUILD_TESTING)
 
     add_executable(power_tests
         tests/test_ring_buffer.cpp
-        tests/test_nvml_api.cpp)
+        tests/test_nvml_api.cpp
+        tests/test_sampler.cpp)
     target_link_libraries(power_tests PRIVATE power_core power_warnings GTest::gtest_main)
     target_compile_definitions(power_tests PRIVATE
         FAKE_NVML_PATH="$<TARGET_FILE:fake_nvml>"
