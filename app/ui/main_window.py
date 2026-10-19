@@ -38,6 +38,7 @@ from app.core.trainer import (
 from app.ui import readings
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
 from app.ui.widgets import header
+from app.ui.widgets.gauge import ArcGauge
 from app.ui.widgets.header import HeaderBar
 from app.ui.widgets.phase_progress import PhaseProgressBar
 from app.ui.widgets.tile import MetricTile
@@ -84,23 +85,34 @@ class MainWindow(QMainWindow):
         # --- LEFT PANEL: Hardware Stats & Controls ---
         left_panel = QVBoxLayout()
 
-        # 1. Hardware Dashboard: one tile per reading, in readings.TILES order.
+        # 1. Hardware Dashboard: gauges for the readings with a full scale,
+        # tiles for the rest, in readings.GAUGES / readings.TILES order.
         hw_group = QGroupBox("Live Hardware Telemetry")
-        hw_layout = QGridLayout()
-        hw_layout.setSpacing(8)
+        hw_layout = QVBoxLayout()
+        gauge_row = QHBoxLayout()
+        gauge_row.setSpacing(4)
+        # Power and VRAM have no scale until the card reports its limit and
+        # total; until then they grow to fit what has been seen.
+        scales = {"temp": readings.TEMP_SCALE_C, "util": readings.UTIL_SCALE_PCT}
+        self.gauges = {}
+        for key, title, unit in readings.GAUGES:
+            self.gauges[key] = ArcGauge(title, unit, scales.get(key))
+            gauge_row.addWidget(self.gauges[key])
+        hw_layout.addLayout(gauge_row)
+
+        tile_grid = QGridLayout()
+        tile_grid.setSpacing(8)
         self.tiles = {}
         for i, (key, title, _) in enumerate(readings.TILES):
             tile = MetricTile(title)
             self.tiles[key] = tile
-            if key == "throttle":
-                # Reasons can run to "Power cap, Thermal": give it the width.
-                hw_layout.addWidget(tile, i // 2, 0, 1, 2)
-            else:
-                hw_layout.addWidget(tile, i // 2, i % 2)
+            tile_grid.addWidget(tile, i // 2, i % 2)
         self.tiles["throttle"].setToolTip(
             "Why the clock is below its maximum, straight from the driver: "
             "power cap, power brake, or thermal slowdown."
         )
+        self.tiles["throttle"].lbl_value.setWordWrap(True)
+        hw_layout.addLayout(tile_grid)
         hw_group.setLayout(hw_layout)
         left_panel.addWidget(hw_group)
 
@@ -375,8 +387,22 @@ class MainWindow(QMainWindow):
         if self._vram_total_mib is None and data.get('vram_total_mb'):
             self._vram_total_mib = data['vram_total_mb']
             self._update_fit_hint()
+        self._show_gauges(data)
         for key, _, read in readings.TILES:
             self.tiles[key].set_reading(read(data))
+
+    def _show_gauges(self, data: dict):
+        limit = (self._device_info or {}).get("power_limit_w")
+        if limit:
+            self.gauges["power"].set_maximum(limit)
+        if data.get("vram_total_mb"):
+            self.gauges["vram"].set_maximum(data["vram_total_mb"] / 1024)
+
+        for key, reading in readings.gauge_readings(data, limit).items():
+            number = reading.number
+            if key == "vram" and number is not None:
+                number /= 1024                    # the gauge is scaled in GiB
+            self.gauges[key].set_value(number, reading.value, reading.state, reading.caption)
 
     # --- theme & persisted settings --------------------------------------------
 
@@ -390,6 +416,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_stylesheet(theme))
         self.phase_bar.set_theme(theme)
         self.header.set_theme(theme)
+        for gauge in self.gauges.values():
+            gauge.set_theme(theme)
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
             self._theme_canvas(canvas)
 

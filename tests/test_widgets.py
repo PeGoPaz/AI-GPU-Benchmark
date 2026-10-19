@@ -133,3 +133,72 @@ def test_chip_grows_with_its_text(qapp):
     short, long = Chip("Idle"), Chip("Measuring transients")
 
     assert long.sizeHint().width() > short.sizeHint().width()
+
+
+
+# --- arc gauge ----------------------------------------------------------------------
+
+@pytest.fixture
+def gauge(qapp):
+    from app.ui.widgets.gauge import ArcGauge
+    g = ArcGauge("Temperature", "°C", maximum=100)
+    g.resize(140, 140)
+    return g
+
+
+@pytest.mark.parametrize("value, expected", [(0.4, 0.5), (3, 5), (7, 10), (120, 200),
+                                             (230, 250), (0, 1)])
+def test_scales_round_up_to_readable_numbers(value, expected):
+    from app.ui.widgets.gauge import nice_ceiling
+
+    assert nice_ceiling(value) == expected
+
+
+def test_fraction_is_clamped_to_the_scale(gauge):
+    gauge.set_value(150, "150")
+    assert gauge.fraction() == 1.0
+
+    gauge.set_value(-5, "-5")
+    assert gauge.fraction() == 0.0
+
+    gauge.set_value(None, "N/A")
+    assert gauge.fraction() == 0.0
+
+
+def test_unscaled_gauge_grows_to_fit_and_never_shrinks(qapp):
+    from app.ui.widgets.gauge import ArcGauge
+    g = ArcGauge("Power", "W")
+
+    g.set_value(180, "180")
+    assert g.maximum() == 200
+    g.set_value(40, "40")
+    assert g.maximum() == 200
+
+
+def _top_of_arc(gauge):
+    """The pixel at 12 o'clock on the arc: halfway along its 270° sweep."""
+    rect, _, _ = gauge.arc_geometry()
+    image = gauge.grab().toImage()
+    return image.pixelColor(int(rect.center().x()), int(rect.top()))
+
+
+def test_arc_fills_clockwise_from_the_start(gauge):
+    from PyQt6.QtGui import QColor
+
+    from app.ui.style import LIGHT
+
+    gauge.set_value(40, "40")
+    assert _top_of_arc(gauge) == QColor(LIGHT.track)
+
+    gauge.set_value(60, "60")
+    assert _top_of_arc(gauge) == QColor(LIGHT.accent)
+
+
+def test_arc_takes_the_state_colour(gauge):
+    from PyQt6.QtGui import QColor
+
+    from app.ui.style import LIGHT
+
+    gauge.set_value(95, "95", state="crit")
+
+    assert _top_of_arc(gauge) == QColor(LIGHT.crit)

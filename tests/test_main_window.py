@@ -70,7 +70,7 @@ def window(qapp, monkeypatch, tmp_path):
 
 def test_telemetry_labels_show_new_metrics(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(9))
-    assert window.tiles["temp"].caption_text() == "memory 89 °C"
+    assert window.tiles["mem_temp"].value_text() == "89"
     assert window.tiles["headroom"].value_text() == "16"
 
 
@@ -78,7 +78,7 @@ def test_unsupported_fields_render_na(window, telemetry_sample):
     """GPUs without the memory-temp field must show N/A, not crash."""
     window.update_telemetry_ui(
         telemetry_sample(0, temp_memory=None, temp_headroom_c=None))
-    assert window.tiles["temp"].caption_text() == ""
+    assert window.tiles["mem_temp"].value_text() == "N/A"
     assert window.tiles["headroom"].value_text() == "N/A"
 
 
@@ -759,11 +759,11 @@ def test_failed_run_exports_telemetry_without_a_report(started_run, telemetry_sa
 
 def test_power_label_shows_the_native_peak(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(0, power_w=180.0, power_peak_w=262.4))
-    assert window.tiles["power"].value_text() == "180"
-    assert window.tiles["power"].caption_text() == "peak 262 W"
+    assert window.gauges["power"].text() == "180"
+    assert window.gauges["power"].caption() == "peak 262 W"
 
     window.update_telemetry_ui(telemetry_sample(1, power_w=180.0, power_peak_w=None))
-    assert window.tiles["power"].caption_text() == "250 ms average"
+    assert window.gauges["power"].caption() == "250 ms average"
 
 
 def test_sampler_status_is_logged(window):
@@ -854,19 +854,47 @@ def test_header_says_when_there_is_no_gpu(window):
 
 
 
-def test_hot_card_turns_its_tile_red(window, telemetry_sample):
+def test_hot_card_turns_its_gauge_red(window, telemetry_sample):
+    from app.ui.style import LIGHT
+
+    window.update_telemetry_ui(telemetry_sample(0, temp_gpu=91))
+    gauge = window.gauges["temp"]
+
+    assert gauge.state() == "crit"
+    assert gauge.color() == LIGHT.crit
+
+
+def test_tile_states_reach_the_stylesheet(window, telemetry_sample):
     from PyQt6.QtGui import QColor
 
     from app.ui.style import LIGHT
 
-    window.update_telemetry_ui(telemetry_sample(0, temp_gpu=91))
-    tile = window.tiles["temp"]
+    window.update_telemetry_ui(telemetry_sample(0, temp_headroom_c=3))
+    tile = window.tiles["headroom"]
 
     assert tile.state() == "crit"
     assert tile.lbl_value.palette().color(tile.lbl_value.foregroundRole()) == QColor(LIGHT.crit)
 
 
-def test_every_reading_has_a_tile(window):
+def _any_sample():
+    return {"temp_gpu": 60, "power_w": 100.0, "vram_used_mb": 1024, "vram_total_mb": 8192,
+            "gpu_util_pct": 50}
+
+
+def test_every_reading_has_a_gauge_or_a_tile(window):
     from app.ui import readings
 
+    assert list(window.gauges) == [key for key, _, _ in readings.GAUGES]
+    assert set(readings.gauge_readings(_any_sample())) == set(window.gauges)
     assert list(window.tiles) == [key for key, _, _ in readings.TILES]
+
+
+def test_power_and_vram_gauges_scale_to_the_card(window, telemetry_sample):
+    window._on_device_info({"name": "NVIDIA GeForce RTX 4060", "power_limit_w": 115.0})
+    window.update_telemetry_ui(telemetry_sample(0, power_w=112.0, vram_total_mb=8192,
+                                                vram_used_mb=4096))
+
+    assert window.gauges["power"].maximum() == 115.0
+    assert window.gauges["power"].state() == "warn"          # pinned at the limit
+    assert window.gauges["vram"].maximum() == 8.0
+    assert window.gauges["vram"].fraction() == 0.5

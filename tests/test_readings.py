@@ -18,9 +18,10 @@ def test_headroom_gets_tighter_as_it_shrinks(telemetry_sample, room, state):
 
 def test_missing_readings_say_so_rather_than_zero(telemetry_sample):
     sample = telemetry_sample(0, temp_headroom_c=None, fan_speed_pct=None, fan_rpm=None,
-                              pcie_gen=None, throttle_reasons=None)
+                              pcie_gen=None, throttle_reasons=None, temp_memory=None)
 
-    for read in (readings.headroom, readings.fan, readings.pcie, readings.throttle):
+    for read in (readings.headroom, readings.fan, readings.pcie, readings.throttle,
+                 readings.memory_temperature):
         reading = read(sample)
         assert reading.value == "N/A", read.__name__
         assert reading.number is None, read.__name__
@@ -29,8 +30,8 @@ def test_missing_readings_say_so_rather_than_zero(telemetry_sample):
 def test_vram_is_shown_in_gib_with_the_share_in_use(telemetry_sample):
     reading = readings.vram(telemetry_sample(0, vram_used_mb=7782, vram_total_mb=8188))
 
-    assert (reading.value, reading.unit) == ("7.6", "/ 8.0 GiB")
-    assert reading.caption == "95% in use"
+    assert (reading.value, reading.unit) == ("7.6", "GiB")
+    assert reading.caption == "of 8.0 · 95%"
     assert reading.state == "warn"
 
 
@@ -52,3 +53,10 @@ def test_numbers_feed_sparklines_and_gauges(telemetry_sample):
 
     assert readings.temperature(sample).number == sample["temp_gpu"]
     assert readings.clock(sample).number == sample["sm_clock_mhz"]
+
+
+
+def test_power_at_its_limit_is_a_warning(telemetry_sample):
+    assert readings.power(telemetry_sample(0, power_w=110.0), limit_w=115.0).state == "warn"
+    assert readings.power(telemetry_sample(0, power_w=80.0), limit_w=115.0).state == "normal"
+    assert readings.power(telemetry_sample(0, power_w=110.0)).state == "normal"   # limit unknown

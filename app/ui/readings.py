@@ -35,11 +35,22 @@ def _above(value, warn, crit) -> str:
     return CRIT if value >= crit else WARN if value >= warn else NORMAL
 
 
+# A card pinned at its power limit is being held back by it, which is worth
+# a colour even before the throttle reasons say so.
+POWER_WARN_FRACTION = 0.95
+
+
 def temperature(data: dict) -> Reading:
     temp = data['temp_gpu']
-    mem = data.get('temp_memory')
-    return Reading(f"{temp:.0f}", "°C", f"memory {mem:.0f} °C" if mem is not None else "",
+    return Reading(f"{temp:.0f}", "°C", "core",
                    _above(temp, TEMP_WARN_C, TEMP_CRIT_C), float(temp))
+
+
+def memory_temperature(data: dict) -> Reading:
+    mem = data.get('temp_memory')
+    if mem is None:
+        return Reading(NA, caption="not reported by this card")
+    return Reading(f"{mem:.0f}", "°C", "VRAM", number=float(mem))
 
 
 def headroom(data: dict) -> Reading:
@@ -50,12 +61,14 @@ def headroom(data: dict) -> Reading:
     return Reading(f"{room:.0f}", "°C", "before thermal slowdown", state, float(room))
 
 
-def power(data: dict) -> Reading:
+def power(data: dict, limit_w: float | None = None) -> Reading:
     # The poll's reading is smoothed; the peak, when the native sampler
     # supplies it, is the highest instant reading since the last poll.
+    watts = data['power_w']
     peak = data.get('power_peak_w')
     caption = f"peak {peak:.0f} W" if peak is not None else "250 ms average"
-    return Reading(f"{data['power_w']:.0f}", "W", caption, number=float(data['power_w']))
+    state = WARN if limit_w and watts >= POWER_WARN_FRACTION * limit_w else NORMAL
+    return Reading(f"{watts:.0f}", "W", caption, state, float(watts))
 
 
 def clock(data: dict) -> Reading:
@@ -71,7 +84,7 @@ def utilization(data: dict) -> Reading:
 def vram(data: dict) -> Reading:
     used, total = data['vram_used_mb'], data['vram_total_mb']
     pct = 100 * used / total if total else 0.0
-    return Reading(f"{used / 1024:.1f}", f"/ {total / 1024:.1f} GiB", f"{pct:.0f}% in use",
+    return Reading(f"{used / 1024:.1f}", "GiB", f"of {total / 1024:.1f} · {pct:.0f}%",
                    _above(pct, VRAM_WARN_PCT, VRAM_CRIT_PCT), float(used))
 
 
@@ -105,14 +118,33 @@ def throttle(data: dict) -> Reading:
     return Reading(", ".join(reasons), caption="holding the clock down", state=WARN)
 
 
-# Tile order on the dashboard: (key, title, reading function).
+# Readings with a natural full scale get an arc gauge: (key, title, unit).
+GAUGES = (
+    ("temp", "Temperature", "°C"),
+    ("power", "Power", "W"),
+    ("vram", "VRAM", "GiB"),
+    ("util", "Utilization", "%"),
+)
+
+
+def gauge_readings(data: dict, limit_w: float | None = None) -> dict[str, Reading]:
+    """The four gauge readings by key. Power needs the card's limit to judge."""
+    return {
+        "temp": temperature(data),
+        "power": power(data, limit_w),
+        "vram": vram(data),
+        "util": utilization(data),
+    }
+
+# Full scales known up front; power and VRAM come from the card itself.
+TEMP_SCALE_C = 100.0
+UTIL_SCALE_PCT = 100.0
+
+# The rest are tiles, in dashboard order: (key, title, reading).
 TILES = (
-    ("temp", "GPU Temperature", temperature),
     ("headroom", "Thermal Headroom", headroom),
-    ("power", "Power", power),
-    ("util", "Utilization", utilization),
+    ("mem_temp", "Memory Temp", memory_temperature),
     ("clock", "Clock", clock),
-    ("vram", "VRAM", vram),
     ("fan", "Fan", fan),
     ("pcie", "PCIe Link", pcie),
     ("throttle", "Throttle", throttle),
