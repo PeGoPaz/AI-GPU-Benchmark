@@ -53,12 +53,18 @@ jobs:
         run: mypy
 
   test:
-    name: Test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.13"]
+        include:
+          # The whole suite on Windows too: paths, encodings, file locking
+          # and Qt's platform plugin all differ there.
+          - os: windows-latest
+            python-version: "3.13"
 
     steps:
       - uses: actions/checkout@v7
@@ -75,8 +81,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      # PyQt6 needs these even with the offscreen platform plugin.
+      # PyQt6 needs these even with the offscreen platform plugin. Windows
+      # and macOS ship what it needs.
       - name: Install Qt system libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
