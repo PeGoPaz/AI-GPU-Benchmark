@@ -14,4 +14,6 @@ bitsandbytes>=0.43.0
 
 # Visualization & Data
 matplotlib>=3.8.0
+# Live charts in the window; matplotlib draws the exported ones
+pyqtgraph>=0.13.7
 pandas>=2.2.0

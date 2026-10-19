@@ -249,11 +249,21 @@ def test_button_styles_are_not_swapped_at_runtime(started_run):
     assert started_run.btn_start.styleSheet() == ""
 
 
+def _drawn(window, *names):
+    """Which of the named live-chart series currently have data on screen."""
+    drawn = []
+    for name in names:
+        curve = window.charts.curves[name]
+        x, _ = curve.getData()
+        if curve.isVisible() and x is not None and len(x):
+            drawn.append(name)
+    return drawn
+
+
 def _util_plot_labels(window):
-    """Series names across both axes — the clock sits on the twin."""
-    return [line.get_label()
-            for axes in window.util_canvas.figure.axes
-            for line in axes.get_lines()]
+    """Series drawn on the utilization panel — the clock sits on the twin."""
+    from app.ui.live_charts import CLOCK, FAN, UTIL
+    return _drawn(window, UTIL, FAN, CLOCK)
 
 
 def _finish_run(window, telemetry_sample, n=5, **overrides):
@@ -286,9 +296,12 @@ def test_percentages_and_clock_use_separate_axes(window, telemetry_sample):
     curve onto the zero line, which made the fan and utilization unreadable."""
     _finish_run(window, telemetry_sample)
 
-    percent_axes, clock_axes = window.util_canvas.figure.axes
-    assert percent_axes.get_ylim() == (0, 105)
-    assert [line.get_label() for line in clock_axes.get_lines()] == ["SM Clock (MHz)"]
+    from app.ui.live_charts import CLOCK, UTIL
+
+    charts = window.charts
+    assert charts.util_plot.vb.viewRange()[1] == pytest.approx([0, 105])
+    assert charts.curves[CLOCK].getViewBox() is charts.clock_view
+    assert charts.curves[UTIL].getViewBox() is charts.util_plot.vb
 
 
 def test_workload_settings_reach_the_trainer(window, monkeypatch):
@@ -344,24 +357,23 @@ def test_summary_records_what_was_benchmarked(window, telemetry_sample):
     assert rows["Gradient Checkpointing"] == "On"
 
 
-def test_tab_labels_keep_their_ampersand(window):
-    """A single & is a mnemonic marker to Qt and gets swallowed, which showed
-    the tabs as "Thermal _Power" and "Utilization, Clock  Fan"."""
-    labels = [window.plot_tabs.tabText(i) for i in range(window.plot_tabs.count())]
+def test_chart_tabs(window):
+    """Thermal and utilization share one tab — and one time axis — so a clock
+    dip lines up with the temperature that caused it."""
+    labels = [window.charts.tabText(i) for i in range(window.charts.count())]
 
-    assert labels == ["Thermal && Power", "Utilization, Clock && Fan", "Loss"]
+    assert labels == ["Telemetry", "Loss"]
+    assert window.charts.util_plot.getViewBox().state["linkedViews"][0] is not None
 
 
 def test_window_and_export_draw_the_same_series(window, telemetry_sample):
     """The tabs and the PNG used to be two hand-maintained copies of the same
     charts, and every change to one had to be repeated in the other."""
+    from app.ui.live_charts import CLOCK, FAN, POWER, POWER_INSTANT, TEMP, UTIL
     from app.utils.plots import build_report_figure
 
     _finish_run(window, telemetry_sample)
-    on_screen = sorted(line.get_label()
-                       for canvas in (window.thermal_canvas, window.util_canvas)
-                       for axes in canvas.figure.axes
-                       for line in axes.get_lines())
+    on_screen = sorted(_drawn(window, TEMP, POWER, POWER_INSTANT, UTIL, FAN, CLOCK))
     exported = sorted(line.get_label()
                       for axes in build_report_figure(window.logger.to_dataframe()).axes
                       for line in axes.get_lines())
@@ -536,7 +548,7 @@ def test_progress_line_shows_rate_and_time_left():
 def test_charts_are_visible_and_live_during_the_run(started_run, telemetry_sample):
     """The heavier presets run for tens of minutes; a bare progress bar told
     nothing about what the card was doing until it was all over."""
-    assert not started_run.plot_tabs.isHidden()
+    assert not started_run.charts.isHidden()
     assert started_run._live_timer.isActive()
 
     for i in range(5):
@@ -546,14 +558,14 @@ def test_charts_are_visible_and_live_during_the_run(started_run, telemetry_sampl
     started_run._refresh_live_charts()
 
     assert _util_plot_labels(started_run)
-    loss_lines = started_run.loss_canvas.figure.axes[0].get_lines()
-    assert list(loss_lines[0].get_ydata()) == [3.2, 3.0]
+    from app.ui.live_charts import LOSS
+    assert list(started_run.charts.curves[LOSS].getData()[1]) == [3.2, 3.0]
 
 
 def test_live_refresh_survives_an_empty_run(started_run):
     started_run._refresh_live_charts()
 
-    assert not started_run.util_canvas.figure.axes
+    assert _util_plot_labels(started_run) == []
 
 
 def test_live_refresh_stops_when_the_run_ends(started_run, telemetry_sample):
@@ -628,11 +640,12 @@ def test_dark_theme_recolours_window_and_charts(window, telemetry_sample):
 
     window_color = QApplication.instance().palette().color(QPalette.ColorRole.Window)
     assert window_color.name().upper() == DARK.window
-    assert window.thermal_canvas.figure.get_facecolor()[:3] == pytest.approx(
-        (0x23 / 255, 0x23 / 255, 0x23 / 255))
+    background = window.charts.telemetry_view.backgroundBrush().color().name().upper()
+    assert background == DARK.chart_bg
 
     window.act_dark.setChecked(False)
-    assert window.thermal_canvas.figure.get_facecolor()[:3] == pytest.approx((1, 1, 1))
+    background = window.charts.telemetry_view.backgroundBrush().color().name().upper()
+    assert background == "#FFFFFF"
 
 
 def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
@@ -643,9 +656,9 @@ def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
     _finish_run(window, telemetry_sample)
     window.act_dark.setChecked(True)
 
-    percent_axes, clock_axes = window.util_canvas.figure.axes
-    assert clock_axes.yaxis.label.get_color() == CLOCK_COLOR
-    assert percent_axes.yaxis.label.get_color() == "#DDDDDD"
+    charts = window.charts
+    assert charts.axis_text_color(charts.util_plot, "right") == CLOCK_COLOR.upper()
+    assert charts.axis_text_color(charts.util_plot, "left") == "#DDDDDD"
 
 
 def test_theme_is_remembered(window, tmp_path):
@@ -802,9 +815,8 @@ def test_summary_shows_transients_when_the_trace_exists(window, telemetry_sample
     rows = _summary_rows(window)
     assert rows["Peak Power, instant (W)"] == "330.0"
     assert rows["Native Sampling (Hz)"].startswith("500, ")
-    thermal_labels = [line.get_label() for ax in window.thermal_canvas.figure.axes
-                      for line in ax.get_lines()]
-    assert "Power, instant (W)" in thermal_labels
+    from app.ui.live_charts import POWER_INSTANT
+    assert _drawn(window, POWER_INSTANT) == [POWER_INSTANT]
 
 
 def test_summary_without_a_trace_has_no_transient_rows(window, telemetry_sample):

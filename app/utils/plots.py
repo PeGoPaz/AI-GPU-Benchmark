@@ -1,12 +1,11 @@
-"""Chart drawing shared by the window's tabs and the exported PNG.
+"""matplotlib charts for everything drawn once: the exported PNG, the report.
 
-Both used to carry their own copy of every series, colour and axis label, so
-each change to a chart had to be made twice, in two modules — and the two had
-already started to drift apart. Each function here draws one panel onto an
-axes it is handed, which leaves figure layout (two tabs on screen, two stacked
-panels on disk) as the only thing the callers still decide.
+The live charts in the window are pyqtgraph (app/ui/live_charts.py), but they
+take their series names, colours and throttle spans from here, so the two
+cannot drift apart the way two hand-maintained copies of each chart once did.
+Each function draws one panel onto an axes it is handed, which leaves figure
+layout as the only thing the callers decide.
 """
-import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
@@ -168,44 +167,6 @@ def draw_loss(ax: Axes, steps: list[int], losses: list[float],
     ax.grid(True, alpha=0.2)
     if steps:
         ax.legend(loc='upper right')
-
-
-def apply_chart_theme(fig: Figure, background: str, foreground: str,
-                      grid: str) -> None:
-    """Recolours an already drawn figure for the window's theme.
-
-    Done after drawing rather than through rcParams, because matplotlib reads
-    those when an artist is created and ticks are created lazily at draw time
-    — long after any rc_context around the plotting code has closed. A y-axis
-    coloured to match one of its own curves (temperature red, power blue,
-    clock cyan) keeps that colour; every other label follows the theme. The
-    match is against the curves rather than against matplotlib's default
-    colour, so a figure can be re-themed any number of times. The exported
-    PNG is never themed: it stays light for printing.
-    """
-    fig.set_facecolor(background)
-    for ax in fig.axes:
-        ax.set_facecolor(background)
-        ax.title.set_color(foreground)
-        ax.xaxis.label.set_color(foreground)
-        ax.tick_params(axis='x', colors=foreground)
-        series = [line.get_color() for line in ax.get_lines()]
-        label_color = ax.yaxis.label.get_color()
-        if any(mcolors.same_color(label_color, c) for c in series):
-            ax.tick_params(axis='y', color=foreground)    # marks, not labels
-        else:
-            ax.yaxis.label.set_color(foreground)
-            ax.tick_params(axis='y', colors=foreground)
-        ax.tick_params(grid_color=grid)
-        for spine in ax.spines.values():
-            spine.set_edgecolor(foreground)
-
-        legend = ax.get_legend()
-        if legend is not None:
-            legend.get_frame().set_facecolor(background)
-            legend.get_frame().set_edgecolor(grid)
-            for text in legend.get_texts():
-                text.set_color(foreground)
 
 
 def build_report_figure(df, trace=None) -> Figure:

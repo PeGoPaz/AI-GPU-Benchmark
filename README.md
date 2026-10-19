@@ -51,7 +51,7 @@ The GUI window opens with:
 - A "Start Stress Test" button — launches the LoRA fine-tuning run
 - An execution log and a phase-aware progress bar: it animates while the model loads, then fills the run's plan as two segments — warm-up steps (executed, not timed) in amber, measured steps in green — with the live rate and an ETA measured from the first completed step underneath, since model loading would otherwise make every early estimate wildly pessimistic
 - A "Stop" button that ends the run at the next step boundary without freezing the window
-- Three tabbed graphs — **Thermal & Power**, **Utilization, Clock & Fan** and **Loss** — that are visible from the moment a run starts and redraw once a second as data arrives, then a **Benchmark Summary** table on completion. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
+- Live charts drawn with pyqtgraph, visible from the moment a run starts and updated at the 4 Hz telemetry arrives at: a **Telemetry** tab with temperature and power over utilization, fan and clock — two plots on one shared time axis, so a clock dip lines up with the temperature behind it, and zoomable and pannable while the run goes on — and a **Loss** tab. When the run ends they get a final draw from the complete data, then a **Benchmark Summary** table appears. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
 - An "Export Results" button that writes the finished run to `logs/` as CSV + PNG + a JSON run report
 - A **View → Dark theme** toggle covering the widgets, the stylesheet and the charts. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
@@ -134,7 +134,8 @@ main.py                        — entry point: the window, or a headless run wi
 app/
   cli.py                       — headless mode: argument parsing, a run wired to stdout
   ui/
-    main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
+    main_window.py             — GUI layout, thread wiring, summary table, console log
+    live_charts.py             — pyqtgraph live charts, fed one snapshot at a time
     style.py                   — light and dark palettes, the QPalette and stylesheet built from them
     readings.py                — what each telemetry tile shows, and the thresholds that colour it (pure, no Qt)
     widgets/                   — dashboard widgets (header, status chips, arc gauges, metric tiles, sparklines, phase progress bar), themed from the palette
@@ -167,7 +168,7 @@ requirements-dev.txt           — test and lint tooling (no ML stack)
 | UI | PyQt6 |
 | GPU monitoring | nvidia-ml-py (PyNVML) |
 | ML training | PyTorch, Transformers, PEFT, datasets, bitsandbytes |
-| Data & plotting | pandas, matplotlib |
+| Data & plotting | pandas, pyqtgraph (live), matplotlib (export) |
 | Tests & linting | pytest, ruff, mypy |
 
 ---
@@ -203,7 +204,7 @@ The window and the headless run both say at start-up whether native sampling is 
 
 ### Why the sampler is C++
 
-A Python thread can poll NVML every millisecond too — as long as nothing else in the process wants the GIL. During a benchmark, plenty does: the window redraws its charts once a second, pandas aggregates the telemetry, and every Python thread waiting for the GIL gets it only when the holder lets go, at most every switch interval (5 ms by default). The native thread never asks for it. `native/bench/sampler_bench.py` measures exactly that difference: both samplers aim for the same 1 kHz cadence and skip missed slots the same way, while the main thread sleeps, spins in pure Python, or does a dashboard's worth of DataFrame and chart work.
+A Python thread can poll NVML every millisecond too — as long as nothing else in the process wants the GIL. During a benchmark, plenty does: the window updates its charts four times a second, pandas aggregates the telemetry, and every Python thread waiting for the GIL gets it only when the holder lets go, at most every switch interval (5 ms by default). The native thread never asks for it. `native/bench/sampler_bench.py` measures exactly that difference: both samplers aim for the same 1 kHz cadence and skip missed slots the same way, while the main thread sleeps, spins in pure Python, or does a dashboard's worth of DataFrame and chart work.
 
 Measured on macOS (Apple M3), Python 3.13.7, scripted source, 1000 µs target (1000 Hz), 5 s per scenario.
 
@@ -222,6 +223,6 @@ With the main thread idle the two are indistinguishable — which is the point: 
 
 ## Output
 
-During a run the graphs redraw once a second from the telemetry collected so far; after it, they get a final draw and the summary table appears. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`), a two-panel plot PNG (`logs/plot_<timestamp>.png`) and a run report (`logs/report_<timestamp>.json`), and can be pressed repeatedly for the same run.
+During a run the live charts take in each telemetry snapshot as it arrives; pyqtgraph swaps the curves' data rather than redrawing the figure, which is what keeps them smooth through a long run. After it, they get a final draw from the logger's complete data — the same data the export uses — and the summary table appears. The exported PNG is drawn by matplotlib from the same series, colours and throttle spans. Percentages and clock speed sit on separate axes, so a card throttling its clock under load is visible rather than flattened against the utilization line. Nothing is written to disk during a run — the logger keeps telemetry in memory. Pressing **Export Results** writes a timestamped CSV (`logs/run_<timestamp>.csv`), a two-panel plot PNG (`logs/plot_<timestamp>.png`) and a run report (`logs/report_<timestamp>.json`), and can be pressed repeatedly for the same run.
 
 The report is what makes a result comparable with anyone else's: the GPU, driver and CUDA version, the enforced power limit, the versions of torch, transformers, peft and bitsandbytes, every workload setting, every summary figure and the loss curve, plus the names of the CSV and PNG it belongs to. It carries a `schema_version`; fields are added rather than renamed, so older reports stay readable. A run that failed has no summary to report, so its telemetry exports as CSV and PNG only. The Hugging Face Trainer creates `results/` as its `output_dir`, though at the default checkpoint interval (every 500 steps) every preset ends before anything is written there. Both directories are gitignored.

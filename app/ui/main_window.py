@@ -1,5 +1,3 @@
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 from PyQt6.QtCore import QSettings, Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
@@ -17,7 +15,6 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -36,6 +33,7 @@ from app.core.trainer import (
     fits_in_vram,
 )
 from app.ui import readings
+from app.ui.live_charts import LiveCharts
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
 from app.ui.widgets import header
 from app.ui.widgets.gauge import ArcGauge
@@ -44,20 +42,13 @@ from app.ui.widgets.phase_progress import PhaseProgressBar
 from app.ui.widgets.tile import MetricTile
 from app.utils.display import RateTracker, format_progress, summary_rows
 from app.utils.logger import BenchmarkLogger
-from app.utils.plots import (
-    apply_chart_theme,
-    draw_loss,
-    draw_thermal_power,
-    draw_utilization,
-)
 from app.utils.report import build_report
 
 SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 
-# How often the charts are redrawn while a run is in progress. Telemetry
-# arrives four times a second; redrawing that often would cost the UI thread
-# more than it shows.
-LIVE_REFRESH_MS = 1000
+# How often the live charts take in new data: as often as telemetry arrives.
+# pyqtgraph swaps curve data without redrawing the figure, so this is cheap.
+LIVE_REFRESH_MS = 250
 
 
 class MainWindow(QMainWindow):
@@ -235,25 +226,10 @@ class MainWindow(QMainWindow):
         self.lbl_progress = QLabel("")
         self.lbl_progress.setObjectName("progressInfo")
 
-        # Tab widget for multiple plots
-        self.plot_tabs = QTabWidget()
-        self.plot_tabs.setMinimumHeight(280)
-        self.plot_tabs.setVisible(False)
-
-        # Tab 1: Thermal & Power
-        thermal_figure = Figure(figsize=(8, 3))
-        self.thermal_canvas = FigureCanvas(thermal_figure)
-        self.plot_tabs.addTab(self.thermal_canvas, "Thermal && Power")
-
-        # Tab 2: Utilization & Clock
-        util_figure = Figure(figsize=(8, 3))
-        self.util_canvas = FigureCanvas(util_figure)
-        self.plot_tabs.addTab(self.util_canvas, "Utilization, Clock && Fan")
-
-        # Tab 3: Loss
-        loss_figure = Figure(figsize=(8, 3))
-        self.loss_canvas = FigureCanvas(loss_figure)
-        self.plot_tabs.addTab(self.loss_canvas, "Loss")
+        # Live charts: telemetry (two plots on one time axis) and loss.
+        self.charts = LiveCharts()
+        self.charts.setMinimumHeight(320)
+        self.charts.setVisible(False)
 
         # Summary stats table
         self.summary_group = QGroupBox("Benchmark Summary")
@@ -273,7 +249,7 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(self.console)
         right_panel.addWidget(self.phase_bar)
         right_panel.addWidget(self.lbl_progress)
-        right_panel.addWidget(self.plot_tabs, 2)
+        right_panel.addWidget(self.charts, 2)
         right_panel.addWidget(self.summary_group)
 
         main_layout.addLayout(left_panel, 1)
@@ -364,6 +340,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot(object)
     def _on_power_trace(self, chunk):
         self.logger.log_power_trace(chunk)
+        if self.logger.is_logging:
+            self.charts.append_trace(chunk)
 
     @pyqtSlot(str)
     def _on_telemetry_error(self, message: str):
@@ -384,6 +362,8 @@ class MainWindow(QMainWindow):
     def update_telemetry_ui(self, data: dict):
         """Updates the dashboard with live PyNVML data."""
         self.logger.log(data)
+        if self.logger.is_logging:
+            self.charts.append(data)
         if self._vram_total_mib is None and data.get('vram_total_mb'):
             self._vram_total_mib = data['vram_total_mb']
             self._update_fit_hint()
@@ -416,17 +396,11 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_stylesheet(theme))
         self.phase_bar.set_theme(theme)
         self.header.set_theme(theme)
+        self.charts.set_theme(theme)
         for gauge in self.gauges.values():
             gauge.set_theme(theme)
         for tile in self.tiles.values():
             tile.set_theme(theme)
-        for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
-            self._theme_canvas(canvas)
-
-    def _theme_canvas(self, canvas):
-        apply_chart_theme(canvas.figure, self._theme.chart_bg,
-                          self._theme.chart_fg, self._theme.chart_grid)
-        canvas.draw()
 
     @pyqtSlot(bool)
     def _on_dark_toggled(self, dark: bool):
@@ -573,12 +547,11 @@ class MainWindow(QMainWindow):
         self._rate = RateTracker()
         self._run_warmup = self.spin_warmup.value()
         self.lbl_progress.setText("")
-        # Visible from the start and redrawn as data arrives: a run on the
+        # Visible from the start and fed as data arrives: a run on the
         # heavier presets is far too long to watch a bare progress bar.
-        for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
-            canvas.figure.clear()
-            self._theme_canvas(canvas)
-        self.plot_tabs.setVisible(True)
+        self.charts.reset()
+        self.charts.set_warmup(self._run_warmup)
+        self.charts.setVisible(True)
         self._live_timer.start()
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         if self.lbl_fit.property("warning"):
@@ -634,12 +607,10 @@ class MainWindow(QMainWindow):
     def _on_loss(self, step: int, loss: float):
         self._loss_steps.append(step)
         self._loss_values.append(loss)
+        self.charts.append_loss(step, loss)
 
     def _refresh_live_charts(self):
-        df = self.logger.to_dataframe()
-        if df is not None and len(df) >= 2:
-            self._draw_telemetry(df)
-        self._draw_loss()
+        self.charts.refresh()
 
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
@@ -690,31 +661,11 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.btn_start.setEnabled(True)
 
-    def _draw_telemetry(self, df):
-        trace = self.logger.power_trace()
-        for canvas, draw in ((self.thermal_canvas, lambda ax: draw_thermal_power(ax, df, trace)),
-                             (self.util_canvas, lambda ax: draw_utilization(ax, df))):
-            figure = canvas.figure
-            figure.clear()
-            draw(figure.add_subplot(111))
-            figure.tight_layout()
-            self._theme_canvas(canvas)
-
-    def _draw_loss(self):
-        figure = self.loss_canvas.figure
-        figure.clear()
-        draw_loss(figure.add_subplot(111), self._loss_steps, self._loss_values,
-                  self._run_warmup)
-        figure.tight_layout()
-        self._theme_canvas(self.loss_canvas)
-
     def _render_plots(self, df, summary: dict):
-        """Final draw of all three tabs once the run is over."""
-        self._draw_telemetry(df)
-        self._draw_loss()
-
-        self.plot_tabs.setVisible(True)
-        self.plot_tabs.setCurrentIndex(0)
+        """Final draw from the complete run, exactly as it will be exported."""
+        self.charts.show_run(df, self.logger.power_trace())
+        self.charts.setVisible(True)
+        self.charts.setCurrentIndex(0)
 
         # --- Summary Stats Table ---
         self._render_summary(df, summary)
