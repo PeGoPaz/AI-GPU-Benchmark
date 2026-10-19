@@ -35,6 +35,8 @@ from app.core.trainer import (
     fits_in_vram,
 )
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
+from app.ui.widgets import header
+from app.ui.widgets.header import HeaderBar
 from app.ui.widgets.phase_progress import PhaseProgressBar
 from app.utils.display import RateTracker, format_progress, summary_rows
 from app.utils.logger import BenchmarkLogger
@@ -64,10 +66,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
         self.resize(800, 650)
 
-        # Main Layout
+        # Main Layout: the header across the top, the two panels below it.
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
+        outer_layout = QVBoxLayout(central_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        self.header = HeaderBar()
+        outer_layout.addWidget(self.header)
+        body = QWidget()
+        outer_layout.addWidget(body, 1)
+        main_layout = QHBoxLayout(body)
 
         # --- LEFT PANEL: Hardware Stats & Controls ---
         left_panel = QVBoxLayout()
@@ -322,11 +331,13 @@ class MainWindow(QMainWindow):
     def _on_gpu_name_ready(self, gpu_name: str):
         """Updates the window title once the GPU name is detected."""
         self.setWindowTitle(f"AI GPU Benchmark — {gpu_name}")
+        self.header.set_gpu_name(gpu_name)
         self.log_to_console(f"Detected GPU: {gpu_name}")
 
     @pyqtSlot(dict)
     def _on_device_info(self, info: dict):
         self._device_info = info
+        self.header.set_device_info(info)
         if info.get("driver_version"):
             self.log_to_console(
                 f"Driver {info['driver_version']}, CUDA {info.get('cuda_driver_version') or '?'}")
@@ -334,6 +345,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def _on_sampler_status(self, status: dict):
         self._sampler_status = status
+        self.header.set_sampler(status)
         if status["active"]:
             self.log_to_console(f"Power sampler: native, {status['detail']}, "
                                 f"every {status['interval_us'] / 1000:g} ms")
@@ -355,6 +367,8 @@ class MainWindow(QMainWindow):
         if message == self._last_telemetry_error:
             return
         self._last_telemetry_error = message
+        if message.startswith("NVML Initialization Failed"):
+            self.header.set_gpu_unavailable(message)
         self.log_to_console(f"TELEMETRY ERROR: {message}")
 
     @pyqtSlot(dict)
@@ -442,6 +456,7 @@ class MainWindow(QMainWindow):
             app.setPalette(build_qpalette(theme, self.style().standardPalette()))
         self.setStyleSheet(build_stylesheet(theme))
         self.phase_bar.set_theme(theme)
+        self.header.set_theme(theme)
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
             self._theme_canvas(canvas)
 
@@ -589,6 +604,7 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.btn_export.setEnabled(False)
         self.phase_bar.start(self.spin_warmup.value(), self.spin_steps.value())
+        self.header.set_status(header.LOADING)
         self.summary_group.setVisible(False)
         self._loss_steps, self._loss_values = [], []
         self._rate = RateTracker()
@@ -633,6 +649,7 @@ class MainWindow(QMainWindow):
         if self.trainer and self.trainer.isRunning():
             self.log_to_console("\nStop requested — finishing current step...")
             self.trainer.stop()
+            self.header.set_status(header.STOPPING)
         self.btn_stop.setEnabled(False)
 
     @pyqtSlot(int)
@@ -644,6 +661,9 @@ class MainWindow(QMainWindow):
     def _on_progress(self, step: int):
         """Moves the bar and recomputes rate and ETA."""
         self.phase_bar.set_step(step)
+        if self.header.status() != header.STOPPING:
+            self.header.set_status(header.WARMUP if self.phase_bar.phase() == "warm-up"
+                                   else header.MEASURING)
         rate = self._rate.update(step)
         self.lbl_progress.setText(format_progress(step, self._total_steps, rate))
 
@@ -662,6 +682,7 @@ class MainWindow(QMainWindow):
     def on_benchmark_finished(self, summary: dict):
         self._live_timer.stop()
         self.phase_bar.finish()
+        self.header.set_status(header.STOPPED if summary.get('aborted') else header.DONE)
         self.btn_stop.setEnabled(False)
         self._last_summary = summary
         df = self.logger.stop()
@@ -696,6 +717,7 @@ class MainWindow(QMainWindow):
         # Close the run, or its partial telemetry leaks into the next one.
         df = self.logger.stop()
         self.phase_bar.reset()
+        self.header.set_status(header.FAILED)
         self._set_idle_controls()
         self.btn_export.setEnabled(df is not None)
 

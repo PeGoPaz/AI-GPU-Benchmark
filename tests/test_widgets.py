@@ -77,3 +77,59 @@ def test_theme_switch_recolours_the_bar(phase_bar):
     phase_bar.set_theme(DARK)
 
     assert _pixel(phase_bar, 0.5) == QColor(DARK.ok)
+
+
+# --- header bar ---------------------------------------------------------------------
+
+@pytest.fixture
+def header_bar(qapp):
+    from app.ui.widgets.header import HeaderBar
+    return HeaderBar()
+
+
+def test_device_details_skip_what_the_driver_did_not_say():
+    from app.ui.widgets.header import device_details
+
+    full = {"vram_total_mb": 8188.0, "driver_version": "580.82",
+            "cuda_driver_version": "13.0", "power_limit_w": 115.0,
+            "pcie_gen_max": 4, "pcie_width_max": 8}
+    assert device_details(full) == "8.0 GiB · driver 580.82 · CUDA 13.0 · 115 W limit · PCIe Gen4 x8"
+    assert device_details({"driver_version": "580.82"}) == "driver 580.82"
+    assert device_details({}) == ""
+
+
+def test_header_shows_the_card_it_was_told_about(header_bar):
+    header_bar.set_device_info({"name": "NVIDIA GeForce RTX 4060", "driver_version": "580.82"})
+
+    assert header_bar.lbl_gpu.text() == "NVIDIA GeForce RTX 4060"
+    assert header_bar.lbl_details.text() == "driver 580.82"
+
+
+def test_status_chip_colour_follows_the_state(header_bar):
+    from app.ui.style import LIGHT
+    from app.ui.widgets import header
+
+    header_bar.set_status(header.MEASURING)
+    assert header_bar.status_chip.text() == "Measuring"
+    assert header_bar.status_chip.color() == LIGHT.ok
+
+    header_bar.set_status(header.FAILED)
+    assert header_bar.status_chip.color() == LIGHT.crit
+
+
+def test_sampler_chip_appears_once_the_mode_is_known(header_bar):
+    assert header_bar.sampler_chip.isHidden()
+
+    header_bar.set_sampler({"active": False, "detail": "native module not built"})
+
+    assert not header_bar.sampler_chip.isHidden()
+    assert header_bar.sampler_chip.text() == "250 ms polls"
+    assert header_bar.sampler_chip.toolTip() == "native module not built"
+
+
+def test_chip_grows_with_its_text(qapp):
+    from app.ui.widgets.chip import Chip
+
+    short, long = Chip("Idle"), Chip("Measuring transients")
+
+    assert long.sizeHint().width() > short.sizeHint().width()

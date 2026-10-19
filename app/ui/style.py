@@ -169,6 +169,28 @@ QLabel#fitHint[warning="true"] {{
     font-weight: bold;
 }}
 
+QFrame#header {{
+    background-color: {theme.surface};
+    border-bottom: 1px solid {theme.border};
+}}
+
+QLabel#headerApp {{
+    color: {theme.muted};
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}}
+
+QLabel#headerGpu {{
+    color: {theme.text_strong};
+    font-size: 18px;
+    font-weight: bold;
+}}
+
+QLabel#headerDetails {{
+    color: {theme.muted};
+}}
+
 QTextEdit#console {{
     background-color: {CONSOLE_BG};
     color: {CONSOLE_FG};

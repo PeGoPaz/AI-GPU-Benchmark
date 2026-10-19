@@ -46,7 +46,7 @@ python main.py
 The GUI window opens with:
 
 - A live hardware telemetry dashboard (temperature, memory temperature, thermal headroom, power, clock speed, VRAM, fan speed, PCIe link, and why the clock is throttled) that begins polling as soon as the app starts
-- Automatic GPU name detection shown in the window title
+- A header with the detected GPU, its VRAM, driver and CUDA version, enforced power limit and PCIe link, whether power comes from the native sampler or 250 ms polls, and the run's state — Idle, Loading, Warm-up, Measuring, Stopping, Done, Stopped or Failed. Without an NVIDIA driver it says so instead of sitting on "detecting"
 - A **Workload** panel with four presets (Quick, Standard, Extended, Stress) and the individual fields behind them — editing any field switches to Custom. It picks the model (TinyLlama 1.1B, Qwen2.5 1.5B, Phi-2 2.7B, Qwen2.5 3B, Phi-3.5 mini 3.8B, Qwen2.5 7B), step count, batch size, precision, sequence length, warm-up steps and gradient checkpointing, locked for the duration of a run. Under it, an estimate of the model's weights against the card's VRAM turns into a warning when the selection will not fit — the 7B model needs INT4 on an 8 GB card
 - A "Start Stress Test" button — launches the LoRA fine-tuning run
 - An execution log and a phase-aware progress bar: it animates while the model loads, then fills the run's plan as two segments — warm-up steps (executed, not timed) in amber, measured steps in green — with the live rate and an ETA measured from the first completed step underneath, since model loading would otherwise make every early estimate wildly pessimistic
@@ -136,7 +136,7 @@ app/
   ui/
     main_window.py             — GUI layout, thread wiring, tabbed plot canvases, summary table, console log
     style.py                   — light and dark palettes, the QPalette and stylesheet built from them
-    widgets/                   — custom-painted dashboard widgets (phase progress bar, ...), themed from the palette
+    widgets/                   — custom-painted dashboard widgets (header, status chips, phase progress bar), themed from the palette
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window

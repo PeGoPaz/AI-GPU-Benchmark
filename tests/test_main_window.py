@@ -808,3 +808,43 @@ def test_summary_without_a_trace_has_no_transient_rows(window, telemetry_sample)
     _finish_run(window, telemetry_sample)
 
     assert "Peak Power, instant (W)" not in _summary_rows(window)
+
+
+# --- header -----------------------------------------------------------------------
+
+def test_header_tracks_the_run_from_start_to_finish(started_run):
+    from app.ui.widgets import header
+
+    assert started_run.header.status() == header.LOADING
+    warmup = started_run.spin_warmup.value()
+    started_run.trainer.max_steps_ready.emit(warmup + 300)
+    started_run.trainer.progress_updated.emit(1)
+    assert started_run.header.status() == header.WARMUP
+    started_run.trainer.progress_updated.emit(warmup + 1)
+    assert started_run.header.status() == header.MEASURING
+
+    started_run.stop_benchmark()
+    assert started_run.header.status() == header.STOPPING
+    started_run.trainer.progress_updated.emit(warmup + 2)
+    assert started_run.header.status() == header.STOPPING   # not overwritten
+
+    started_run.trainer.training_finished.emit({
+        "total_steps": 2, "requested_steps": 300, "aborted": True,
+        "elapsed_time_sec": 1.0, "steps_per_sec": 2.0,
+    })
+    assert started_run.header.status() == header.STOPPED
+
+
+def test_header_marks_a_failed_run(started_run):
+    from app.ui.widgets import header
+
+    started_run.trainer.error_occurred.emit("HF Training Error: CUDA out of memory")
+
+    assert started_run.header.status() == header.FAILED
+
+
+def test_header_says_when_there_is_no_gpu(window):
+    window._on_telemetry_error("NVML Initialization Failed: no driver")
+
+    assert window.header.lbl_gpu.text() == "No NVIDIA GPU detected"
+    assert "no driver" in window.header.lbl_details.text()
