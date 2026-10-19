@@ -55,6 +55,7 @@ The GUI window opens with:
 - Live charts drawn with pyqtgraph, visible from the moment a run starts and updated at the 4 Hz telemetry arrives at: a **Telemetry** tab with temperature and power over utilization, fan and clock — two plots on one shared time axis, so a clock dip lines up with the temperature behind it, and zoomable and pannable while the run goes on, with a crosshair that follows the mouse through both plots and reads out every series at that moment, in its own colour — and a **Loss** tab. When the run ends they get a final draw from the complete data, and the **Benchmark Summary** appears: headline cards for throughput (tokens/s), estimated compute, efficiency (tokens/J), peak power and maximum temperature, with every other figure in a **Details** table folded underneath. A card the run cannot support — no token count, no energy reading — is left out rather than shown as a dash. The loss curve is not a convergence plot, the run is far too short for that, but a flat one is the quickest sign the adapters are not receiving gradients
 - An "Export Results" button that writes the finished run to `logs/` as CSV + PNG + a JSON run report
 - A **View → Dark theme** toggle covering the widgets, the stylesheet and the charts. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
+- **Help → About** listing what the build is made of — Python, Qt and PyQt, the torch / transformers / peft / bitsandbytes / nvidia-ml-py versions, the native module's version and compiler, how power is being sampled, and the GPU and driver — with a **Copy** button that puts it all on the clipboard for a bug report. The app has its own icon (`app/ui/assets/icon.svg`)
 - A resizable layout: telemetry and workload on the left (scrolling when the window is short), charts, summary and execution log on the right, split by draggable dividers. The log can be dragged shut or hidden from **View → Execution log**, and window size, panel splits and the log's visibility are restored on the next launch
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
@@ -141,6 +142,8 @@ app/
     style.py                   — light and dark palettes, the QPalette and stylesheet built from them
     readings.py                — what each telemetry tile shows, and the thresholds that colour it (pure, no Qt)
     icons.py                   — toolbar glyphs as embedded SVG, rendered in the theme's colours
+    about.py                   — Help → About: component versions, copyable for bug reports
+    assets/icon.svg            — the app icon
     widgets/                   — dashboard widgets (header, status chips, arc gauges, metric tiles, sparklines, result cards, phase progress bar), themed from the palette
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup

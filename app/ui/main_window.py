@@ -38,6 +38,7 @@ from app.core.trainer import (
     fits_in_vram,
 )
 from app.ui import icons, readings
+from app.ui.about import AboutDialog, about_rows, app_icon
 from app.ui.live_charts import LiveCharts
 from app.ui.style import (
     LIGHT,
@@ -80,6 +81,7 @@ class MainWindow(QMainWindow):
         self.settings = settings if settings is not None else QSettings(
             SETTINGS_ORG, SETTINGS_APP)
         self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
+        self.setWindowIcon(app_icon())
         self.resize(1360, 900)              # until a saved geometry says otherwise
 
         # Main Layout: the header across the top, the two panels below it.
@@ -366,6 +368,12 @@ class MainWindow(QMainWindow):
         self.act_log.toggled.connect(self.log_panel.setVisible)
         view_menu.addAction(self.act_log)
 
+        help_menu = self.menuBar().addMenu("&Help")
+        self.act_about = QAction("&About AI GPU Benchmark", self)
+        self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
+        self.act_about.triggered.connect(self.show_about)
+        help_menu.addAction(self.act_about)
+
         self.toolbar = QToolBar("Benchmark")
         self.toolbar.setObjectName("mainToolbar")
         self.toolbar.setMovable(False)
@@ -518,6 +526,12 @@ class MainWindow(QMainWindow):
             gauge.set_theme(theme)
         for tile in self.tiles.values():
             tile.set_theme(theme)
+
+    def about_dialog(self) -> AboutDialog:
+        return AboutDialog(about_rows(self._device_info, self._sampler_status), self)
+
+    def show_about(self):
+        self.about_dialog().exec()
 
     def _paint_icons(self, theme):
         """Toolbar glyphs in the theme's text colour; Start and Stop in theirs."""

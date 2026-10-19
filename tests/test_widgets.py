@@ -279,3 +279,29 @@ def test_every_glyph_renders_in_the_requested_colour(qapp):
         reds = [image.pixelColor(x, y) for x in range(24) for y in range(24)
                 if image.pixelColor(x, y).alpha() == 255]
         assert reds and all(c == QColor("#ff0000") for c in reds), name
+
+
+# --- app icon & about ----------------------------------------------------------------
+
+def test_app_icon_renders(qapp):
+    from app.ui.about import ICON_PATH, app_icon
+
+    assert ICON_PATH.is_file()
+    assert not app_icon().pixmap(64, 64).toImage().isNull()
+
+
+def test_about_text_lines_up_its_columns():
+    from app.ui.about import about_text
+
+    text = about_text([("Python", "3.13"), ("Native module", "not built")])
+
+    assert text == "Python         3.13\nNative module  not built"
+
+
+def test_native_status_without_the_module(monkeypatch):
+    import sys
+
+    from app.ui import about
+    monkeypatch.setitem(sys.modules, "nvml_sampler", None)
+
+    assert about.native_module_status().startswith("not built")

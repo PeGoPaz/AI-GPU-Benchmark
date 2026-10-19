@@ -1,5 +1,6 @@
 """MainWindow wiring. Skipped automatically when Qt cannot start headless."""
 import os
+import sys
 
 import pytest
 
@@ -1093,3 +1094,33 @@ def test_icons_follow_the_theme(window):
 
     assert dark != light
     assert "M12 3v12" in icons.svg("export", "#000000")
+
+
+# --- icon & about -------------------------------------------------------------------
+
+def test_window_has_the_app_icon(window):
+    assert not window.windowIcon().isNull()
+
+
+def test_about_lists_what_the_build_is_made_of(window):
+    window._on_device_info({"name": "NVIDIA GeForce RTX 4060", "driver_version": "580.82",
+                            "cuda_driver_version": "13.0"})
+    window._on_sampler_status({"active": False, "detail": "native module not built"})
+
+    rows = dict(window.about_dialog().rows)
+
+    assert rows["Python"].startswith(sys.version.split()[0])
+    assert "/" in rows["Qt / PyQt"]
+    assert rows["GPU"] == "NVIDIA GeForce RTX 4060"
+    assert rows["Driver / CUDA"] == "580.82 / 13.0"
+    assert rows["Power sampling"] == "native module not built"
+    assert "Native module" in rows
+
+
+def test_about_copies_its_details_for_a_bug_report(window):
+    dialog = window.about_dialog()
+    dialog.copy()
+
+    copied = QApplication.clipboard().text()
+    assert copied.splitlines()[0].startswith("Python")
+    assert "Native module" in copied

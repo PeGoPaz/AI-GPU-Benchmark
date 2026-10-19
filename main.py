@@ -17,10 +17,12 @@ def main() -> int:
     # Imported here so a headless run never loads the widget stack.
     from PyQt6.QtWidgets import QApplication
 
+    from app.ui.about import app_icon
     from app.ui.main_window import MainWindow
 
     app = QApplication(sys.argv[:1] + qt_args)
     app.setStyle("Fusion")
+    app.setWindowIcon(app_icon())
     window = MainWindow()
     window.show()
     return app.exec()
