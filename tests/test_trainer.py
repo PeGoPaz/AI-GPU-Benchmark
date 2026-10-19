@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 import app.core.trainer as trainer_module
-from app.core.trainer import PyQtProgressCallback, TrainerWorker
+from app.core.trainer import ProgressCallbackLogic, TrainerWorker
 
 
 class _FakeWorker:
@@ -28,7 +28,7 @@ class _FakeWorker:
 
 def _drive_callback(steps, stop_at=None, warmup_steps=0):
     worker = _FakeWorker(warmup_steps=warmup_steps)
-    cb = PyQtProgressCallback(worker)
+    cb = ProgressCallbackLogic(worker)
     state = types.SimpleNamespace(global_step=0, log_history=[{"loss": 0.5}])
     control = types.SimpleNamespace(should_training_stop=False)
 
@@ -97,11 +97,14 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, warmup_elapsed=5.0,
              ("TrainingArguments", "AutoTokenizer", "AutoModelForCausalLM",
               "load_dataset", "get_peft_model", "LoraConfig",
               "BitsAndBytesConfig")}
+    # The ML stack as run() sees it: conftest's stubs, with the entry points
+    # under test swapped for mocks and the Trainer for the fake above.
+    hf = types.SimpleNamespace(**{**vars(trainer_module._hf()),
+                                  "Trainer": FakeTrainer, **mocks})
     with mock.patch.multiple(
         trainer_module,
-        Trainer=FakeTrainer,
+        _hf=lambda: hf,
         time=types.SimpleNamespace(time=clock_now),
-        **mocks,
     ):
         worker.run()
     captured["mocks"] = mocks
@@ -311,7 +314,7 @@ def test_each_precision_maps_to_matching_dtype_and_flags():
         assert (args["bf16"], args["fp16"]) == (spec.bf16, spec.fp16), spec.label
         assert not (args["bf16"] and args["fp16"]), spec.label
         assert model_kwargs["torch_dtype"] is getattr(
-            trainer_module.torch, spec.dtype_name), spec.label
+            trainer_module._hf().torch, spec.dtype_name), spec.label
 
 
 def test_summary_records_the_precision():
@@ -431,7 +434,7 @@ def test_int4_is_the_qlora_recipe():
         "load_in_4bit": True,
         "bnb_4bit_quant_type": "nf4",
         "bnb_4bit_use_double_quant": True,
-        "bnb_4bit_compute_dtype": trainer_module.torch.bfloat16,
+        "bnb_4bit_compute_dtype": trainer_module._hf().torch.bfloat16,
     }
     assert load_kwargs["quantization_config"] is bnb.return_value
 
@@ -449,6 +452,7 @@ def test_quantized_runs_skip_the_fp32_upcast():
     """prepare_model_for_kbit_training() upcasts embeddings and LM head to
     FP32 — 4.4 GB on Qwen2.5 7B, enough to push the run past an 8 GB card."""
     assert not hasattr(trainer_module, "prepare_model_for_kbit_training")
+    assert not hasattr(trainer_module._hf(), "prepare_model_for_kbit_training")
 
 
 def test_summary_records_the_quantized_precision():
@@ -577,7 +581,7 @@ def test_loss_is_reported_with_the_step_it_belongs_to():
     """Reading log_history in on_step_end always gave the previous step's
     loss: HF logs a step only after its on_step_end callbacks have run."""
     worker = _FakeWorker()
-    cb = PyQtProgressCallback(worker)
+    cb = ProgressCallbackLogic(worker)
     state = types.SimpleNamespace(global_step=7, log_history=[{"loss": 9.9}])
 
     cb.on_log(None, state, None, logs={"loss": 2.5, "learning_rate": 2e-4})
@@ -588,7 +592,7 @@ def test_loss_is_reported_with_the_step_it_belongs_to():
 def test_closing_summary_log_is_not_a_loss_point():
     """The final log carries train_loss — the run average — not a step loss."""
     worker = _FakeWorker()
-    cb = PyQtProgressCallback(worker)
+    cb = ProgressCallbackLogic(worker)
     state = types.SimpleNamespace(global_step=150, log_history=[])
 
     cb.on_log(None, state, None, logs={"train_loss": 1.8, "train_runtime": 70.0})
@@ -601,7 +605,7 @@ def test_progress_reports_the_step_alone():
     steps = []
     worker = _FakeWorker()
     worker.progress_updated = types.SimpleNamespace(emit=steps.append)
-    cb = PyQtProgressCallback(worker)
+    cb = ProgressCallbackLogic(worker)
     control = types.SimpleNamespace(should_training_stop=False)
 
     for step in (1, 2, 3):
@@ -609,3 +613,73 @@ def test_progress_reports_the_step_alone():
                        control)
 
     assert steps == [1, 2, 3]
+
+
+# --- lazy ML stack ------------------------------------------------------------
+
+def _python(code):
+    """Runs code in a fresh interpreter: conftest's stubs do not reach it."""
+    import os
+    import subprocess
+    import sys
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          cwd=root, env=env, timeout=120)
+
+
+def test_registries_import_without_the_ml_stack():
+    """The window and the CLI import this module for its presets; paying
+    for torch there cost seconds at every start-up."""
+    result = _python(
+        "import sys, app.core.trainer, app.cli\n"
+        "print(sorted(m for m in ('torch', 'transformers', 'peft', 'datasets')"
+        " if m in sys.modules))")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"
+
+
+def test_list_works_without_the_ml_stack():
+    result = _python("import sys; sys.argv = ['main.py', '--list']\n"
+                     "import main; sys.exit(main.main())")
+
+    assert result.returncode == 0, result.stderr
+    assert "Presets:" in result.stdout
+
+
+def test_missing_ml_stack_is_reported_with_the_fix():
+    errors = []
+    worker = TrainerWorker(steps=10, warmup_steps=0)
+    for signal in ("status_updated", "max_steps_ready"):
+        setattr(worker, signal, types.SimpleNamespace(emit=lambda *_: None))
+    worker.error_occurred = types.SimpleNamespace(emit=errors.append)
+
+    def missing():
+        raise ImportError("No module named 'torch'")
+
+    with mock.patch.object(trainer_module, "_hf", missing):
+        worker.run()
+
+    assert len(errors) == 1
+    assert "No module named 'torch'" in errors[0]
+    assert "pip install -r requirements.txt" in errors[0]
+
+
+def test_trainer_callback_runs_our_logic_over_hfs_hooks():
+    class HookBase:
+        def on_step_end(self, *a, **k):
+            raise AssertionError("HF's no-op shadowed our logic")
+
+        def on_train_begin(self, *a, **k):
+            return "hf default"
+
+    hf = types.SimpleNamespace(TrainerCallback=HookBase)
+    with mock.patch.object(trainer_module, "_hf", lambda: hf):
+        cb = trainer_module.progress_callback(_FakeWorker())
+
+    state = types.SimpleNamespace(global_step=3, log_history=[])
+    cb.on_step_end(None, state, types.SimpleNamespace(should_training_stop=False))
+
+    assert cb.worker.completed_steps == 3
+    assert cb.on_train_begin() == "hf default"

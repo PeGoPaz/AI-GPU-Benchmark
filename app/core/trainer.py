@@ -1,19 +1,41 @@
 import gc
 import time
+import types
 from dataclasses import dataclass
+from functools import lru_cache
 
-import torch
-from datasets import load_dataset
-from peft import LoraConfig, get_peft_model
 from PyQt6.QtCore import QThread, pyqtSignal
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    Trainer,
-    TrainerCallback,
-    TrainingArguments,
-)
+
+
+@lru_cache(maxsize=1)
+def _hf() -> types.SimpleNamespace:
+    """The ML stack, imported on first use rather than with this module.
+
+    torch alone takes seconds to import, and this module is imported at
+    start-up by the window and the CLI — for its model, precision and preset
+    registries, not to train. Deferring the import moves that cost into the
+    training thread, where it runs while the window is already responsive,
+    and lets the registries (and `main.py --list`) work where torch is not
+    installed at all.
+    """
+    import torch
+    from datasets import load_dataset
+    from peft import LoraConfig, get_peft_model
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+        Trainer,
+        TrainerCallback,
+        TrainingArguments,
+    )
+    return types.SimpleNamespace(
+        torch=torch, load_dataset=load_dataset,
+        LoraConfig=LoraConfig, get_peft_model=get_peft_model,
+        AutoModelForCausalLM=AutoModelForCausalLM, AutoTokenizer=AutoTokenizer,
+        BitsAndBytesConfig=BitsAndBytesConfig, Trainer=Trainer,
+        TrainerCallback=TrainerCallback, TrainingArguments=TrainingArguments,
+    )
 
 
 @dataclass(frozen=True)
@@ -180,17 +202,18 @@ def quantization_config(precision: PrecisionSpec):
     """bitsandbytes settings for a quantized precision, None for a plain dtype."""
     if precision.quant_bits is None:
         return None
+    hf = _hf()
     if precision.quant_bits == 4:
-        return BitsAndBytesConfig(
+        return hf.BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             # Quantizes the quantization constants too: ~0.37 bits/param
             # saved, about 0.3 GB on a 7B model.
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=getattr(torch, precision.dtype_name),
+            bnb_4bit_compute_dtype=getattr(hf.torch, precision.dtype_name),
         )
     if precision.quant_bits == 8:
-        return BitsAndBytesConfig(load_in_8bit=True)
+        return hf.BitsAndBytesConfig(load_in_8bit=True)
     raise ValueError(f"Unsupported quantization: {precision.quant_bits} bits")
 
 # Tokens per training sequence. The heaviest knob on the panel: every layer's
@@ -232,6 +255,7 @@ def pack_tokens(sequences: list[list[int]], seq_len: int,
 
 def collate_packed(rows):
     """Stacks packed rows into a batch. No padding, so the mask is all ones."""
+    torch = _hf().torch
     input_ids = torch.tensor([row["input_ids"] for row in rows])
     return {
         "input_ids": input_ids,
@@ -240,8 +264,13 @@ def collate_packed(rows):
     }
 
 
-class PyQtProgressCallback(TrainerCallback):
-    """Custom Hugging Face callback to send progress back to the PyQt UI."""
+class ProgressCallbackLogic:
+    """What the Hugging Face progress callback does, minus transformers.
+
+    HF's TrainerCallback is mixed in by progress_callback() when a run
+    starts: subclassing it here would import transformers with this module.
+    Kept separate so the behaviour is testable on its own.
+    """
     def __init__(self, worker):
         self.worker = worker
 
@@ -276,6 +305,17 @@ class PyQtProgressCallback(TrainerCallback):
             self.worker.loss_updated.emit(state.global_step, float(logs["loss"]))
 
 
+def progress_callback(worker):
+    """The callback the Trainer gets: our logic first, HF's no-op hooks after.
+
+    TrainerCallback supplies a do-nothing method for every event the Trainer
+    fires, which is why the logic is mixed into it rather than handed over
+    alone.
+    """
+    cls = type("PyQtProgressCallback", (ProgressCallbackLogic, _hf().TrainerCallback), {})
+    return cls(worker)
+
+
 class TrainerWorker(QThread):
     status_updated = pyqtSignal(str)
     progress_updated = pyqtSignal(int)
@@ -308,13 +348,22 @@ class TrainerWorker(QThread):
             # Warm-up steps really are executed, so the progress bar has to
             # span them too or it would sit at 100% for the whole timed part.
             self.max_steps_ready.emit(self.warmup_steps + self.steps)
+            self.status_updated.emit("Loading the ML stack...")
+            try:
+                hf = _hf()
+            except ImportError as e:
+                self.error_occurred.emit(
+                    f"The ML stack is not installed ({e}). "
+                    "Install it with: pip install -r requirements.txt")
+                return
+            torch = hf.torch
             self.status_updated.emit("Loading Tokenizer & Dataset (may take a moment on first run)...")
 
             model_id = self.model_spec.model_id
 
             # 1. Load Dataset (A small dataset of English quotes)
-            data = load_dataset("Abirate/english_quotes")
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            data = hf.load_dataset("Abirate/english_quotes")
+            tokenizer = hf.AutoTokenizer.from_pretrained(model_id)
             tokenizer.pad_token = tokenizer.eos_token
 
             def tokenize(batch):
@@ -342,7 +391,7 @@ class TrainerWorker(QThread):
             # 152k-token embedding and LM head alone become 4.4 GB, more than
             # the whole 4-bit body. That would push the 7B run past an 8 GB
             # card. The 16-bit runs keep those layers in BF16/FP16 as well.
-            model = AutoModelForCausalLM.from_pretrained(
+            model = hf.AutoModelForCausalLM.from_pretrained(
                 model_id,
                 device_map="cuda:0",
                 torch_dtype=getattr(torch, self.precision.dtype_name),
@@ -352,7 +401,7 @@ class TrainerWorker(QThread):
             self.status_updated.emit("Applying LoRA Adapters...")
 
             # 3. Apply LoRA (Low-Rank Adaptation)
-            config = LoraConfig(
+            config = hf.LoraConfig(
                 r=8,
                 lora_alpha=16,
                 target_modules=list(self.model_spec.lora_targets),
@@ -369,10 +418,10 @@ class TrainerWorker(QThread):
             # takes the reentrant path.
             if self.gradient_checkpointing:
                 model.enable_input_require_grads()
-            model = get_peft_model(model, config)
+            model = hf.get_peft_model(model, config)
 
             # 4. Set up Hugging Face Trainer
-            training_args = TrainingArguments(
+            training_args = hf.TrainingArguments(
                 output_dir="./results",
                 per_device_train_batch_size=self.batch_size,
                 gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
@@ -388,12 +437,12 @@ class TrainerWorker(QThread):
                 report_to="none" # Disables wandb/tensorboard logging
             )
 
-            trainer = Trainer(
+            trainer = hf.Trainer(
                 model=model,
                 train_dataset=packed,
                 args=training_args,
                 data_collator=collate_packed,
-                callbacks=[PyQtProgressCallback(self)]
+                callbacks=[progress_callback(self)]
             )
 
             self.status_updated.emit(

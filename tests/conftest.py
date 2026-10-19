@@ -15,7 +15,7 @@ import pytest
 for _name in ("torch", "transformers", "peft", "datasets"):
     sys.modules.setdefault(_name, mock.MagicMock())
 
-# TrainerCallback is subclassed, so it has to be a real class, not a MagicMock.
+# TrainerCallback is used as a base class, so it has to be a real class.
 sys.modules["transformers"].TrainerCallback = object
 
 
