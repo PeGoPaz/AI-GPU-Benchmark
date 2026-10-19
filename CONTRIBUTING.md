@@ -69,9 +69,8 @@ Everything here reads the JSON run report (`report_<timestamp>.json`), so it wor
 
 The C++ power sampler in `native/` is built, tested and wired in; what is left are the edges.
 
-- **Windows.** The loader only knows `dlopen`. Windows needs `LoadLibrary` with the two places pynvml looks for `nvml.dll` (System32 for DCH drivers, `NVIDIA Corporation\NVSMI` under Program Files for older ones), and an MSVC job in the CI matrix — the warning flags in `native/CMakeLists.txt` are GCC/Clang spellings today.
 - **Per-step power.** The trace is fine-grained enough to attribute energy to individual optimizer steps, if the trainer stamps each step boundary. That would show whether the transients come from the forward pass, the backward pass or the optimizer, and give a joules-per-step distribution rather than one average.
-- **Wheels.** `pip install ./native` compiles on the spot. cibuildwheel in CI could publish prebuilt Linux wheels, so a cloud GPU box needs no compiler at all.
+- **Wheels.** `pip install ./native` compiles on the spot. cibuildwheel in CI could publish prebuilt Linux and Windows wheels, so neither a cloud GPU box nor a gaming PC needs a compiler at all.
 
 ### 4. Inference benchmark
 

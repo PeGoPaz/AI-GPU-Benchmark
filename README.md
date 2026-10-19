@@ -33,6 +33,34 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+### Windows
+
+Everything runs on Windows as well, and CI runs the whole test suite and builds the native module there on every push. In PowerShell:
+
+```powershell
+git clone https://github.com/PeGoPaz/AI-GPU-Benchmark.git
+cd AI-GPU-Benchmark
+py -3.13 -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+If PowerShell refuses to run the activation script, allow local scripts for your user once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+Install torch **before** the rest. On Windows, a plain `pip install torch` installs the CPU-only build, which cannot train on the GPU; the CUDA build comes from PyTorch's own package index. Pick the CUDA version matching your driver on [pytorch.org/get-started](https://pytorch.org/get-started/locally/) — for example:
+
+```powershell
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+```
+
+bitsandbytes, for the INT8 and INT4 precisions, has shipped Windows wheels since 0.43, so `requirements.txt` covers it. `nvml.dll` comes with the NVIDIA driver; both pynvml and the native module find it in `System32` (or in `NVIDIA Corporation\NVSMI` on older drivers) without any configuration.
+
+The native module needs a C++ compiler: install **Visual Studio 2022 Build Tools** with the *Desktop development with C++* workload, then, from the repository root:
+
+```powershell
+pip install .\native
+```
+
 ---
 
 ## Running
@@ -161,7 +189,7 @@ app/
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
-.github/workflows/ci.yml       — CI: ruff, mypy, tests on Python 3.10 and 3.13; native build, sanitizers, clang-format
+.github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 mypy.ini                       — type-check settings
@@ -194,7 +222,7 @@ mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13. The native module gets its own jobs: a warnings-as-errors build with the C++ tests on Linux and macOS, the same tests under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer, a pinned `clang-format` check, and the Python-side tests against the freshly built module. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
+`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13 on Linux, and on Python 3.13 on Windows. The native module gets its own jobs: a warnings-as-errors build with the C++ tests on Linux, macOS and Windows (MSVC), the same tests under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer, a pinned `clang-format` check, and the Python-side tests against the freshly built module. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
 
 ### Native module (optional)
 

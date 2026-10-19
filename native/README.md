@@ -41,6 +41,13 @@ print(sampler.stats())                         # reads, errors, dropped, changes
 - **Stopping.** The thread sleeps on a condition variable rather than in `sleep_until`, so `stop()` wakes it immediately even with a long interval; the read itself happens outside the lock, so `stop()` never waits on the driver.
 - **Honest rate.** The driver refreshes its reading less often than it can be asked. Besides reads, errors and drops, the sampler counts *changes* — reads whose value differed from the previous one — which is the rate at which new information actually arrived, and what the report shows.
 
+## Windows
+
+The module builds with MSVC as well as GCC and Clang, and CI builds it and runs its C++ and Python tests on Windows on every push. Building it locally needs Visual Studio 2022 Build Tools with the *Desktop development with C++* workload; `pip install .\native` finds the compiler by itself. Two things differ from Linux:
+
+- **Finding NVML.** `DynamicLibrary` (`include/power/dynlib.hpp`) wraps `dlopen` and `LoadLibraryW` behind one RAII type, and on Windows the loader looks for `nvml.dll` where pynvml does: `%WINDIR%\System32` first (every current, DCH-packaged driver), then `%ProgramFiles%\NVIDIA Corporation\NVSMI` (older ones).
+- **Timer resolution.** Windows rounds every timed wait up to the system timer tick — 15.6 ms by default — which would turn a 2 ms cadence into 64 Hz. The sampler thread raises the resolution to 1 ms with `timeBeginPeriod(1)` for as long as it runs and restores it when it stops.
+
 ## Benchmark
 
 ```bash
