@@ -66,3 +66,22 @@ def nvml_field_value():
         return types.SimpleNamespace(fieldId=field_id, nvmlReturn=ret,
                                      valueType=value_type, value=union)
     return _make
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """One QApplication for every test that builds widgets.
+
+    Imported here rather than at the top, so modules that need no Qt widgets
+    never load the platform plugin. Skips when Qt cannot start headless.
+    """
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widgets = pytest.importorskip("PyQt6.QtWidgets", reason="PyQt6 not installed")
+    app = widgets.QApplication.instance()
+    if app is None:
+        try:
+            app = widgets.QApplication([])
+        except Exception as exc:                      # noqa: BLE001
+            pytest.skip(f"Qt cannot start headless here: {exc}")
+    return app

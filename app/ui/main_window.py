@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMainWindow,
-    QProgressBar,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -36,6 +35,7 @@ from app.core.trainer import (
     fits_in_vram,
 )
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
+from app.ui.widgets.phase_progress import PhaseProgressBar
 from app.utils.display import RateTracker, format_progress, summary_rows
 from app.utils.logger import BenchmarkLogger
 from app.utils.plots import (
@@ -212,8 +212,7 @@ class MainWindow(QMainWindow):
         self.console.setMaximumHeight(180)
         self.log_to_console("System initialized. Ready for benchmark.")
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
+        self.phase_bar = PhaseProgressBar()
 
         self.lbl_progress = QLabel("")
         self.lbl_progress.setObjectName("progressInfo")
@@ -254,7 +253,7 @@ class MainWindow(QMainWindow):
 
         right_panel.addWidget(QLabel("Execution Log:"))
         right_panel.addWidget(self.console)
-        right_panel.addWidget(self.progress_bar)
+        right_panel.addWidget(self.phase_bar)
         right_panel.addWidget(self.lbl_progress)
         right_panel.addWidget(self.plot_tabs, 2)
         right_panel.addWidget(self.summary_group)
@@ -442,6 +441,7 @@ class MainWindow(QMainWindow):
             # are top-level windows and would not inherit it.
             app.setPalette(build_qpalette(theme, self.style().standardPalette()))
         self.setStyleSheet(build_stylesheet(theme))
+        self.phase_bar.set_theme(theme)
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
             self._theme_canvas(canvas)
 
@@ -588,12 +588,12 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_export.setEnabled(False)
-        self.progress_bar.setValue(0)
+        self.phase_bar.start(self.spin_warmup.value(), self.spin_steps.value())
         self.summary_group.setVisible(False)
         self._loss_steps, self._loss_values = [], []
         self._rate = RateTracker()
         self._run_warmup = self.spin_warmup.value()
-        self.lbl_progress.setText("Loading model…")
+        self.lbl_progress.setText("")
         # Visible from the start and redrawn as data arrives: a run on the
         # heavier presets is far too long to watch a bare progress bar.
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
@@ -638,12 +638,12 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_max_steps(self, total: int):
         self._total_steps = total
-        self.progress_bar.setRange(0, total)
+        self.phase_bar.set_total(total)
 
     @pyqtSlot(int)
     def _on_progress(self, step: int):
         """Moves the bar and recomputes rate and ETA."""
-        self.progress_bar.setValue(step)
+        self.phase_bar.set_step(step)
         rate = self._rate.update(step)
         self.lbl_progress.setText(format_progress(step, self._total_steps, rate))
 
@@ -661,6 +661,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_benchmark_finished(self, summary: dict):
         self._live_timer.stop()
+        self.phase_bar.finish()
         self.btn_stop.setEnabled(False)
         self._last_summary = summary
         df = self.logger.stop()
@@ -694,7 +695,7 @@ class MainWindow(QMainWindow):
         self.log_to_console(f"ERROR: {message}")
         # Close the run, or its partial telemetry leaks into the next one.
         df = self.logger.stop()
-        self.progress_bar.setValue(0)
+        self.phase_bar.reset()
         self._set_idle_controls()
         self.btn_export.setEnabled(df is not None)
 

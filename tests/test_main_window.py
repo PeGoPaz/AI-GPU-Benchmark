@@ -45,17 +45,6 @@ class FakeTrainer(QObject):
         return True
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        try:
-            app = QApplication([])
-        except Exception as exc:                      # noqa: BLE001
-            pytest.skip(f"Qt cannot start headless here: {exc}")
-    return app
-
-
 def _scratch_settings(tmp_path):
     from PyQt6.QtCore import QSettings
     return QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
@@ -582,11 +571,36 @@ def test_live_refresh_stops_when_the_run_fails(started_run):
 
 
 def test_progress_updates_the_eta_line(started_run):
-    started_run.trainer.max_steps_ready.emit(310)
+    warmup = started_run.spin_warmup.value()
+    started_run.trainer.max_steps_ready.emit(warmup + 300)
     started_run.trainer.progress_updated.emit(1)
 
-    assert started_run.progress_bar.maximum() == 310
-    assert started_run.lbl_progress.text() == "Step 1 / 310"
+    assert started_run.phase_bar.phase() == "warm-up"
+    assert started_run.phase_bar.text() == f"Warm-up 1 / {warmup}"
+    assert started_run.lbl_progress.text() == f"Step 1 / {warmup + 300}"
+
+
+def test_phase_bar_follows_the_run(started_run):
+    """Loading until the first step, then warm-up, then measured steps."""
+    warmup = started_run.spin_warmup.value()
+    assert started_run.phase_bar.phase() == "loading"
+
+    started_run.trainer.max_steps_ready.emit(warmup + 300)
+    started_run.trainer.progress_updated.emit(warmup + 30)
+    assert started_run.phase_bar.phase() == "measuring"
+    assert started_run.phase_bar.text() == "Measuring 30 / 300 · 10%"
+
+    started_run.trainer.training_finished.emit({
+        "total_steps": 300, "requested_steps": 300, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 4.3,
+    })
+    assert started_run.phase_bar.phase() == "done"
+
+
+def test_failed_run_clears_the_phase_bar(started_run):
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert started_run.phase_bar.phase() == "idle"
 
 
 

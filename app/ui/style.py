@@ -47,6 +47,16 @@ class Palette:
     chart_bg: str
     chart_fg: str
     chart_grid: str
+    # Dashboard tokens: cards sit a step above the window on `surface`,
+    # outlined in `border`; `track` is the unfilled part of bars and gauges.
+    # ok / warning / crit colour state, accent marks what is interactive.
+    surface: str
+    border: str
+    track: str
+    text_strong: str
+    ok: str
+    crit: str
+    accent: str
     window: str | None = None
     base: str | None = None
     text: str | None = None
@@ -61,6 +71,8 @@ LIGHT = Palette(
     # falls short of readable contrast.
     warning="#B36B00",
     chart_bg="#FFFFFF", chart_fg="#222222", chart_grid="#B0B0B0",
+    surface="#FFFFFF", border="#D5D5D5", track="#E4E4E4", text_strong="#1A1A1A",
+    ok="#2E8B57", crit="#C62828", accent="#3A6EA5",
 )
 
 DARK = Palette(
@@ -69,6 +81,8 @@ DARK = Palette(
     muted="#A0A0A0",
     warning="#E0A030",
     chart_bg="#232323", chart_fg="#DDDDDD", chart_grid="#5A5A5A",
+    surface="#343434", border="#474747", track="#3E3E3E", text_strong="#F2F2F2",
+    ok="#3CB371", crit="#E05252", accent="#5B9BD5",
     window="#2B2B2B", base="#1F1F1F", text="#E6E6E6", highlight="#3A6E99",
 )
 
