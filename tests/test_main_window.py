@@ -886,7 +886,7 @@ def test_every_reading_has_a_gauge_or_a_tile(window):
 
     assert list(window.gauges) == [key for key, _, _ in readings.GAUGES]
     assert set(readings.gauge_readings(_any_sample())) == set(window.gauges)
-    assert list(window.tiles) == [key for key, _, _ in readings.TILES]
+    assert list(window.tiles) == [key for key, *_ in readings.TILES]
 
 
 def test_power_and_vram_gauges_scale_to_the_card(window, telemetry_sample):
@@ -898,3 +898,25 @@ def test_power_and_vram_gauges_scale_to_the_card(window, telemetry_sample):
     assert window.gauges["power"].state() == "warn"          # pinned at the limit
     assert window.gauges["vram"].maximum() == 8.0
     assert window.gauges["vram"].fraction() == 0.5
+
+
+
+def test_numeric_tiles_keep_a_minute_of_history(window, telemetry_sample):
+    from app.ui.widgets.sparkline import HISTORY_POINTS
+
+    for i in range(HISTORY_POINTS + 30):
+        window.update_telemetry_ui(telemetry_sample(0, sm_clock_mhz=2400 + i))
+
+    clock = window.tiles["clock"].sparkline.values()
+    assert len(clock) == HISTORY_POINTS
+    assert clock[-1] == 2400 + HISTORY_POINTS + 29
+    assert window.tiles["pcie"].sparkline is None
+    assert window.tiles["throttle"].sparkline is None
+
+
+def test_trend_line_turns_with_the_tile_state(window, telemetry_sample):
+    from app.ui.style import LIGHT
+
+    window.update_telemetry_ui(telemetry_sample(0, temp_headroom_c=3))
+
+    assert window.tiles["headroom"].sparkline._color == LIGHT.crit

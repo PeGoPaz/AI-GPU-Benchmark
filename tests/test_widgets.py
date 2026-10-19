@@ -202,3 +202,66 @@ def test_arc_takes_the_state_colour(gauge):
     gauge.set_value(95, "95", state="crit")
 
     assert _top_of_arc(gauge) == QColor(LIGHT.crit)
+
+
+
+# --- sparkline ----------------------------------------------------------------------
+
+@pytest.fixture
+def sparkline(qapp):
+    from app.ui.widgets.sparkline import Sparkline
+    line = Sparkline()
+    line.resize(200, 24)
+    return line
+
+
+def test_missing_readings_are_skipped_not_drawn_as_zero(sparkline):
+    for value in (60, None, 61, None, 62):
+        sparkline.append(value)
+
+    assert sparkline.values() == [60, 61, 62]
+
+
+def test_history_is_bounded_to_a_minute(sparkline):
+    from app.ui.widgets.sparkline import HISTORY_POINTS
+
+    for i in range(1000):
+        sparkline.append(i)
+
+    assert len(sparkline.values()) == HISTORY_POINTS
+    assert sparkline.values()[0] == 1000 - HISTORY_POINTS
+
+
+def test_flat_history_paints_without_dividing_by_zero(sparkline):
+    for _ in range(50):
+        sparkline.append(70)
+
+    assert not sparkline.grab().toImage().isNull()
+
+
+def test_newest_point_sits_at_the_right_edge(sparkline):
+    from PyQt6.QtGui import QColor
+
+    from app.ui.style import LIGHT
+
+    for i in range(10):
+        sparkline.append(i)
+    rect = sparkline.line_rect()
+    image = sparkline.grab().toImage()
+
+    # The newest value is the maximum, so its end dot sits at the top-right
+    # corner. Its centre is solid; the rim around it is antialiased.
+    centre = (int(rect.right()), int(rect.top()))
+    around = [image.pixelColor(centre[0] + dx, centre[1] + dy)
+              for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    assert QColor(LIGHT.accent) in around
+
+
+
+def test_range_label_gets_the_room_it_needs(sparkline):
+    sparkline.append(2310)
+    narrow = sparkline.line_rect().width()
+    sparkline.append(2460)
+
+    assert sparkline.range_label() == "2310–2460"
+    assert sparkline.line_rect().width() < narrow

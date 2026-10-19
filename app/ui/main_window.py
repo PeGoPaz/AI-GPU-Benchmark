@@ -103,8 +103,8 @@ class MainWindow(QMainWindow):
         tile_grid = QGridLayout()
         tile_grid.setSpacing(8)
         self.tiles = {}
-        for i, (key, title, _) in enumerate(readings.TILES):
-            tile = MetricTile(title)
+        for i, (key, title, _, trend) in enumerate(readings.TILES):
+            tile = MetricTile(title, trend)
             self.tiles[key] = tile
             tile_grid.addWidget(tile, i // 2, i % 2)
         self.tiles["throttle"].setToolTip(
@@ -388,7 +388,7 @@ class MainWindow(QMainWindow):
             self._vram_total_mib = data['vram_total_mb']
             self._update_fit_hint()
         self._show_gauges(data)
-        for key, _, read in readings.TILES:
+        for key, _, read, _ in readings.TILES:
             self.tiles[key].set_reading(read(data))
 
     def _show_gauges(self, data: dict):
@@ -418,6 +418,8 @@ class MainWindow(QMainWindow):
         self.header.set_theme(theme)
         for gauge in self.gauges.values():
             gauge.set_theme(theme)
+        for tile in self.tiles.values():
+            tile.set_theme(theme)
         for canvas in (self.thermal_canvas, self.util_canvas, self.loss_canvas):
             self._theme_canvas(canvas)
 

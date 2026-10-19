@@ -140,12 +140,13 @@ def gauge_readings(data: dict, limit_w: float | None = None) -> dict[str, Readin
 TEMP_SCALE_C = 100.0
 UTIL_SCALE_PCT = 100.0
 
-# The rest are tiles, in dashboard order: (key, title, reading).
+# The rest are tiles, in dashboard order. The numeric ones carry a
+# one-minute trend line: (key, title, reading, trend).
 TILES = (
-    ("headroom", "Thermal Headroom", headroom),
-    ("mem_temp", "Memory Temp", memory_temperature),
-    ("clock", "Clock", clock),
-    ("fan", "Fan", fan),
-    ("pcie", "PCIe Link", pcie),
-    ("throttle", "Throttle", throttle),
+    ("headroom", "Thermal Headroom", headroom, True),
+    ("mem_temp", "Memory Temp", memory_temperature, True),
+    ("clock", "Clock", clock, True),
+    ("fan", "Fan", fan, True),
+    ("pcie", "PCIe Link", pcie, False),
+    ("throttle", "Throttle", throttle, False),
 )

@@ -6,14 +6,18 @@ and the colours in style.py, and this widget knows neither.
 """
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from app.ui.readings import NORMAL, Reading
+from app.ui.readings import CRIT, NORMAL, WARN, Reading
+from app.ui.style import LIGHT, Palette
+from app.ui.widgets.sparkline import Sparkline
 
 
 class MetricTile(QFrame):
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(self, title: str, trend: bool = False,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("tile")
         self.setProperty("state", NORMAL)
+        self._theme: Palette = LIGHT
 
         self.lbl_title = QLabel(title.upper())
         self.lbl_title.setObjectName("tileTitle")
@@ -37,11 +41,19 @@ class MetricTile(QFrame):
         self._layout.addLayout(value_row)
         self._layout.addWidget(self.lbl_caption)
 
+        # Only numeric readings get a trend; "Gen4 x8" has no line to draw.
+        self.sparkline: Sparkline | None = None
+        if trend:
+            self.sparkline = Sparkline()
+            self._layout.addWidget(self.sparkline)
+
     def set_reading(self, reading: Reading) -> None:
         self.lbl_value.setText(reading.value)
         self.lbl_unit.setText(reading.unit)
         self.lbl_caption.setText(reading.caption)
         self.setToolTip(f"{reading.value} {reading.unit}  {reading.caption}".strip())
+        if self.sparkline is not None:
+            self.sparkline.append(reading.number)
         # Re-polished only on a change: readings arrive four times a second.
         if self.property("state") != reading.state:
             self.setProperty("state", reading.state)
@@ -50,6 +62,19 @@ class MetricTile(QFrame):
                 if style is not None:
                     style.unpolish(widget)
                     style.polish(widget)
+            self._colour_trend()
+
+    def set_theme(self, theme: Palette) -> None:
+        self._theme = theme
+        if self.sparkline is not None:
+            self.sparkline.set_theme(theme)
+        self._colour_trend()
+
+    def _colour_trend(self) -> None:
+        if self.sparkline is not None:
+            state = self.state()
+            self.sparkline.set_color({WARN: self._theme.warning,
+                                      CRIT: self._theme.crit}.get(state))
 
     def value_text(self) -> str:
         return self.lbl_value.text()
