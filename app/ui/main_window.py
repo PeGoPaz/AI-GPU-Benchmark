@@ -1,5 +1,5 @@
-from PyQt6.QtCore import QByteArray, QSettings, Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QAction
+from PyQt6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -36,9 +37,16 @@ from app.core.trainer import (
     estimate_weights_gib,
     fits_in_vram,
 )
-from app.ui import readings
+from app.ui import icons, readings
 from app.ui.live_charts import LiveCharts
-from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
+from app.ui.style import (
+    LIGHT,
+    START_GREEN,
+    STOP_RED,
+    THEMES,
+    build_qpalette,
+    build_stylesheet,
+)
 from app.ui.widgets import header
 from app.ui.widgets.gauge import ArcGauge
 from app.ui.widgets.header import HeaderBar
@@ -54,6 +62,14 @@ SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 # How often the live charts take in new data: as often as telemetry arrives.
 # pyqtgraph swaps curve data without redrawing the figure, so this is cheap.
 LIVE_REFRESH_MS = 250
+
+
+def _mirror(button: QPushButton, action: QAction) -> None:
+    """Makes a button a second face of an action: same trigger, same state."""
+    button.clicked.connect(action.trigger)
+    button.setToolTip(action.toolTip())
+    button.setEnabled(action.isEnabled())
+    action.changed.connect(lambda: button.setEnabled(action.isEnabled()))
 
 
 class MainWindow(QMainWindow):
@@ -196,22 +212,37 @@ class MainWindow(QMainWindow):
         ctrl_group = QGroupBox("Benchmark Controls")
         ctrl_layout = QVBoxLayout()
 
+        # One QAction per command: the toolbar, the shortcut and the button
+        # below all trigger it, and its enabled state is the only one there
+        # is — the buttons mirror it rather than being switched separately.
+        self.act_start = QAction("Start", self)
+        self.act_start.setShortcut(QKeySequence("Ctrl+R"))
+        self.act_start.setToolTip("Start the benchmark (Ctrl+R)")
+        self.act_start.triggered.connect(self.start_benchmark)
+        self.act_stop = QAction("Stop", self)
+        self.act_stop.setShortcut(QKeySequence(Qt.Key.Key_Escape))
+        self.act_stop.setToolTip("Stop at the next step boundary (Esc)")
+        self.act_stop.triggered.connect(self.stop_benchmark)
+        self.act_stop.setEnabled(False)
+        self.act_export = QAction("Export", self)
+        self.act_export.setShortcut(QKeySequence("Ctrl+E"))
+        self.act_export.setToolTip("Write CSV, PNG and the run report to logs/ (Ctrl+E)")
+        self.act_export.triggered.connect(self.export_results)
+        self.act_export.setEnabled(False)
+
         self.btn_start = QPushButton("Start Stress Test")
         self.btn_start.setObjectName("btnStart")
         self.btn_start.setMinimumHeight(40)
-        self.btn_start.clicked.connect(self.start_benchmark)
-
         self.btn_stop = QPushButton("Stop")
         self.btn_stop.setObjectName("btnStop")
         self.btn_stop.setMinimumHeight(35)
-        self.btn_stop.clicked.connect(self.stop_benchmark)
-        self.btn_stop.setEnabled(False)
-
         self.btn_export = QPushButton("Export Results")
         self.btn_export.setObjectName("btnExport")
         self.btn_export.setMinimumHeight(35)
-        self.btn_export.clicked.connect(self.export_results)
-        self.btn_export.setEnabled(False)
+        for button, action in ((self.btn_start, self.act_start),
+                               (self.btn_stop, self.act_stop),
+                               (self.btn_export, self.act_export)):
+            _mirror(button, action)
 
         ctrl_layout.addWidget(self.btn_start)
         ctrl_layout.addWidget(self.btn_stop)
@@ -319,16 +350,33 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([440, 920])
 
         # Menu: the theme is a preference, not a benchmark setting.
+        run_menu = self.menuBar().addMenu("&Run")
+        for action in (self.act_start, self.act_stop, self.act_export):
+            run_menu.addAction(action)
         view_menu = self.menuBar().addMenu("&View")
         self.act_dark = QAction("&Dark theme", self)
         self.act_dark.setCheckable(True)
+        self.act_dark.setShortcut(QKeySequence("Ctrl+Shift+D"))
         self.act_dark.toggled.connect(self._on_dark_toggled)
         view_menu.addAction(self.act_dark)
         self.act_log = QAction("Execution &log", self)
         self.act_log.setCheckable(True)
         self.act_log.setChecked(True)
+        self.act_log.setShortcut(QKeySequence("Ctrl+L"))
         self.act_log.toggled.connect(self.log_panel.setVisible)
         view_menu.addAction(self.act_log)
+
+        self.toolbar = QToolBar("Benchmark")
+        self.toolbar.setObjectName("mainToolbar")
+        self.toolbar.setMovable(False)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toolbar.setIconSize(QSize(18, 18))
+        for action in (self.act_start, self.act_stop, self.act_export):
+            self.toolbar.addAction(action)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.act_log)
+        self.toolbar.addAction(self.act_dark)
+        self.addToolBar(self.toolbar)
 
         # Applied last, so every widget above is polished in one pass.
         self._theme = LIGHT
@@ -462,6 +510,7 @@ class MainWindow(QMainWindow):
             # are top-level windows and would not inherit it.
             app.setPalette(build_qpalette(theme, self.style().standardPalette()))
         self.setStyleSheet(build_stylesheet(theme))
+        self._paint_icons(theme)
         self.phase_bar.set_theme(theme)
         self.header.set_theme(theme)
         self.charts.set_theme(theme)
@@ -469,6 +518,16 @@ class MainWindow(QMainWindow):
             gauge.set_theme(theme)
         for tile in self.tiles.values():
             tile.set_theme(theme)
+
+    def _paint_icons(self, theme):
+        """Toolbar glyphs in the theme's text colour; Start and Stop in theirs."""
+        text = theme.text_strong
+        for action, glyph, color in ((self.act_start, "start", START_GREEN),
+                                     (self.act_stop, "stop", STOP_RED),
+                                     (self.act_export, "export", text),
+                                     (self.act_log, "log", text),
+                                     (self.act_dark, "theme", text)):
+            action.setIcon(icons.icon(glyph, color))
 
     @pyqtSlot(bool)
     def _on_dark_toggled(self, dark: bool):
@@ -622,9 +681,9 @@ class MainWindow(QMainWindow):
 
     def start_benchmark(self):
         """Disables UI and fires up the PyTorch training thread."""
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        self.btn_export.setEnabled(False)
+        self.act_start.setEnabled(False)
+        self.act_stop.setEnabled(True)
+        self.act_export.setEnabled(False)
         self.phase_bar.start(self.spin_warmup.value(), self.spin_steps.value())
         self.header.set_status(header.LOADING)
         self.summary_group.setVisible(False)
@@ -671,7 +730,7 @@ class MainWindow(QMainWindow):
             self.log_to_console("\nStop requested — finishing current step...")
             self.trainer.stop()
             self.header.set_status(header.STOPPING)
-        self.btn_stop.setEnabled(False)
+        self.act_stop.setEnabled(False)
 
     @pyqtSlot(int)
     def _on_max_steps(self, total: int):
@@ -702,7 +761,7 @@ class MainWindow(QMainWindow):
         self._live_timer.stop()
         self.phase_bar.finish()
         self.header.set_status(header.STOPPED if summary.get('aborted') else header.DONE)
-        self.btn_stop.setEnabled(False)
+        self.act_stop.setEnabled(False)
         self._last_summary = summary
         df = self.logger.stop()
         if df is not None:
@@ -719,7 +778,7 @@ class MainWindow(QMainWindow):
             self.log_to_console(
                 f"           {summary['steps_per_sec'] * summary['tokens_per_step']:,.0f} tokens/sec")
         self._set_idle_controls()
-        self.btn_export.setEnabled(True)
+        self.act_export.setEnabled(True)
 
     @pyqtSlot(str)
     def on_benchmark_error(self, message: str):
@@ -738,13 +797,13 @@ class MainWindow(QMainWindow):
         self.phase_bar.reset()
         self.header.set_status(header.FAILED)
         self._set_idle_controls()
-        self.btn_export.setEnabled(df is not None)
+        self.act_export.setEnabled(df is not None)
 
     def _set_idle_controls(self):
         """Returns the control panel to its ready-for-a-new-run state."""
         self.workload_group.setEnabled(True)
-        self.btn_stop.setEnabled(False)
-        self.btn_start.setEnabled(True)
+        self.act_stop.setEnabled(False)
+        self.act_start.setEnabled(True)
 
     def _render_plots(self, df, summary: dict):
         """Final draw from the complete run, exactly as it will be exported."""

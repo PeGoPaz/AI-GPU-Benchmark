@@ -265,3 +265,17 @@ def test_range_label_gets_the_room_it_needs(sparkline):
 
     assert sparkline.range_label() == "2310–2460"
     assert sparkline.line_rect().width() < narrow
+
+
+# --- icons ----------------------------------------------------------------------------
+
+def test_every_glyph_renders_in_the_requested_colour(qapp):
+    from PyQt6.QtGui import QColor
+
+    from app.ui import icons
+
+    for name in icons.GLYPHS:
+        image = icons.icon(name, "#ff0000").pixmap(24, 24).toImage()
+        reds = [image.pixelColor(x, y) for x in range(24) for y in range(24)
+                if image.pixelColor(x, y).alpha() == 255]
+        assert reds and all(c == QColor("#ff0000") for c in reds), name

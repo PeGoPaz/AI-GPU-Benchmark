@@ -1031,3 +1031,65 @@ def test_corrupt_layout_settings_are_ignored(tmp_path, qapp, monkeypatch):
 
     assert win.main_splitter.count() == 2
     win.close()
+
+
+# --- toolbar & shortcuts --------------------------------------------------------------
+
+def test_commands_have_shortcuts(window):
+    assert window.act_start.shortcut().toString() == "Ctrl+R"
+    assert window.act_stop.shortcut().toString() == "Esc"
+    assert window.act_export.shortcut().toString() == "Ctrl+E"
+    assert window.act_dark.shortcut().toString() == "Ctrl+Shift+D"
+
+
+def test_buttons_mirror_their_actions(started_run):
+    """One enabled state per command: switching the action switches both
+    the toolbar entry and the button, so they cannot disagree."""
+    assert not started_run.act_start.isEnabled()
+    assert not started_run.btn_start.isEnabled()
+    assert started_run.act_stop.isEnabled() and started_run.btn_stop.isEnabled()
+
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert started_run.act_start.isEnabled() and started_run.btn_start.isEnabled()
+    assert not started_run.act_stop.isEnabled() and not started_run.btn_stop.isEnabled()
+
+
+def test_shortcut_action_starts_and_stops_a_run(window, monkeypatch):
+    import app.ui.main_window as mw
+    monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
+
+    window.act_start.trigger()
+    assert window.trainer._started
+
+    window.act_stop.trigger()
+    assert not window.trainer._started
+
+
+def test_a_disabled_start_ignores_its_shortcut(started_run):
+    """Ctrl+R mid-run must not start a second trainer over the first."""
+    first = started_run.trainer
+
+    started_run.act_start.trigger()
+
+    assert started_run.trainer is first
+
+
+def test_toolbar_carries_the_run_commands(window):
+    actions = window.toolbar.actions()
+
+    for action in (window.act_start, window.act_stop, window.act_export, window.act_dark):
+        assert action in actions
+        assert not action.icon().isNull()
+
+
+def test_icons_follow_the_theme(window):
+    from app.ui import icons
+
+    window.act_dark.setChecked(True)
+    dark = window.act_export.icon().pixmap(18, 18).toImage()
+    window.act_dark.setChecked(False)
+    light = window.act_export.icon().pixmap(18, 18).toImage()
+
+    assert dark != light
+    assert "M12 3v12" in icons.svg("export", "#000000")
