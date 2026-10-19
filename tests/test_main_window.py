@@ -1191,3 +1191,23 @@ def test_unknown_saved_theme_falls_back_to_system(tmp_path, qapp, monkeypatch):
 
     assert win.theme_choice() == "system"
     win.close()
+
+
+# --- html report ----------------------------------------------------------------------
+
+def test_open_report_opens_the_exported_page(window, telemetry_sample, tmp_path, monkeypatch):
+    import app.ui.main_window as mw
+
+    monkeypatch.chdir(tmp_path)
+    opened = []
+    monkeypatch.setattr(mw.QDesktopServices, "openUrl", lambda url: opened.append(url))
+    assert not window.act_open_report.isEnabled()
+
+    _finish_run(window, telemetry_sample)
+    window.export_results()
+
+    assert window.act_open_report.isEnabled()
+    window.act_open_report.trigger()
+    assert len(opened) == 1
+    assert opened[0].toLocalFile().endswith(".html")
+    assert os.path.isfile(opened[0].toLocalFile())

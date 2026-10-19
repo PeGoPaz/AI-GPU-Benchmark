@@ -283,7 +283,8 @@ class HeadlessRun(QObject):
                               (self._loss_steps, self._loss_values),
                               trace, self._sampler_status)
         try:
-            paths = BenchmarkLogger.export(df, self.output_dir, report=report, trace=trace)
+            paths = BenchmarkLogger.export(df, self.output_dir, report=report, trace=trace,
+                                           summary=summary)
         except OSError as e:
             self._print(f"\nExport failed: {e}")
             self._finish(1)

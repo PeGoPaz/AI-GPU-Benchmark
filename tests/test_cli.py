@@ -178,7 +178,7 @@ def test_finished_run_prints_the_summary_and_writes_everything(tmp_path, telemet
     assert "=== Benchmark Summary ===" in out
     assert "Tokens/sec" in out
     written = sorted(p.suffix for p in tmp_path.iterdir())
-    assert written == [".csv", ".json", ".png"]
+    assert written == [".csv", ".html", ".json", ".png"]
 
     [report] = tmp_path.glob("report_*.json")
     data = json.loads(report.read_text(encoding="utf-8"))

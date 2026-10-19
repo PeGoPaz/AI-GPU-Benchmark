@@ -16,6 +16,7 @@ GLYPHS = {
     "export": f'<path d="M12 3v12M8 11l4 4 4-4M5 20h14" {_STROKE}/>',
     "theme": '<path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z" fill="{c}"/>',
     "log": f'<path d="M5 6h14M5 12h14M5 18h9" {_STROKE}/>',
+    "report": f'<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5" {_STROKE}/>',
 }
 
 

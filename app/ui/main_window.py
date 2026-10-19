@@ -1,5 +1,7 @@
-from PyQt6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
+import os
+
+from PyQt6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl, pyqtSlot
+from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -232,6 +234,12 @@ class MainWindow(QMainWindow):
         self.act_export.setToolTip("Write CSV, PNG and the run report to logs/ (Ctrl+E)")
         self.act_export.triggered.connect(self.export_results)
         self.act_export.setEnabled(False)
+        self.act_open_report = QAction("Open report", self)
+        self.act_open_report.setShortcut(QKeySequence("Ctrl+O"))
+        self.act_open_report.setToolTip("Open the last exported HTML report in the browser (Ctrl+O)")
+        self.act_open_report.triggered.connect(self.open_report)
+        self.act_open_report.setEnabled(False)
+        self._last_html = None
 
         self.btn_start = QPushButton("Start Stress Test")
         self.btn_start.setObjectName("btnStart")
@@ -354,7 +362,7 @@ class MainWindow(QMainWindow):
 
         # Menu: the theme is a preference, not a benchmark setting.
         run_menu = self.menuBar().addMenu("&Run")
-        for action in (self.act_start, self.act_stop, self.act_export):
+        for action in (self.act_start, self.act_stop, self.act_export, self.act_open_report):
             run_menu.addAction(action)
         view_menu = self.menuBar().addMenu("&View")
         # Theme: follow the system by default, or pin light or dark.
@@ -396,7 +404,7 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.toolbar.setIconSize(QSize(18, 18))
-        for action in (self.act_start, self.act_stop, self.act_export):
+        for action in (self.act_start, self.act_stop, self.act_export, self.act_open_report):
             self.toolbar.addAction(action)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.act_log)
@@ -562,6 +570,7 @@ class MainWindow(QMainWindow):
         for action, glyph, color in ((self.act_start, "start", START_GREEN),
                                      (self.act_stop, "stop", STOP_RED),
                                      (self.act_export, "export", text),
+                                     (self.act_open_report, "report", text),
                                      (self.act_log, "log", text),
                                      (self.act_toggle_theme, "theme", text)):
             action.setIcon(icons.icon(glyph, color))
@@ -917,13 +926,21 @@ class MainWindow(QMainWindow):
                                   (self._loss_steps, self._loss_values),
                                   trace, self._sampler_status)
         try:
-            paths = BenchmarkLogger.export(df, report=report, trace=trace)
+            paths = BenchmarkLogger.export(df, report=report, trace=trace,
+                                           summary=self._last_summary)
         except OSError as e:
             self.log_to_console(f"Export failed: {e}")
             return
         for path in paths:
             if path:
                 self.log_to_console(f"Exported: {path}")
+        if paths.html:
+            self._last_html = paths.html
+            self.act_open_report.setEnabled(True)
+
+    def open_report(self):
+        if self._last_html:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(self._last_html)))
 
     def showEvent(self, event):
         """First show without a saved layout: most of the height to the charts.

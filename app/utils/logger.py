@@ -14,6 +14,7 @@ class ExportPaths(NamedTuple):
     plot: str
     report: str | None = None
     power_trace: str | None = None   # only with the native sampler
+    html: str | None = None          # the human-readable page, with a report
 
 
 class BenchmarkLogger:
@@ -84,14 +85,17 @@ class BenchmarkLogger:
     @staticmethod
     def export(df: pd.DataFrame, output_dir: str = "logs",
                report: dict | None = None,
-               trace: pd.DataFrame | None = None) -> ExportPaths:
+               trace: pd.DataFrame | None = None,
+               summary: dict | None = None) -> ExportPaths:
         """Writes the collected telemetry to CSV and generates a plot PNG.
 
         With a report (see app.utils.report), also writes it as JSON beside
         them, pointing at the other files. A run that failed has no summary
         to report, so its telemetry is still exportable without one. With the
         native sampler's trace, that goes into a CSV of its own — at 500 Hz
-        it has thousands of rows for every one of the telemetry CSV's.
+        it has thousands of rows for every one of the telemetry CSV's. With
+        the run's summary as well, the report is also written as a
+        self-contained HTML page (app.utils.html_report).
         """
         os.makedirs(output_dir, exist_ok=True)
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -106,17 +110,26 @@ class BenchmarkLogger:
             trace_path = os.path.join(output_dir, f"power_{timestamp_str}.csv")
             trace.to_csv(trace_path, index=False)
 
-        report_path = None
+        report_path = html_path = None
         if report is not None:
             report_path = os.path.join(output_dir, f"report_{timestamp_str}.json")
             files = {"csv": os.path.basename(csv_path), "plot": os.path.basename(plot_path)}
             if trace_path:
                 files["power_trace"] = os.path.basename(trace_path)
+            if summary is not None:
+                html_path = os.path.join(output_dir, f"report_{timestamp_str}.html")
+                files["html"] = os.path.basename(html_path)
             report = {**report, "files": files}
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
+            if html_path is not None and summary is not None:
+                # Imported here: matplotlib's SVG backend and the display
+                # helpers are only needed when there is a page to write.
+                from app.utils.html_report import build_html
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(build_html(report, df, summary, trace))
 
-        return ExportPaths(csv_path, plot_path, report_path, trace_path)
+        return ExportPaths(csv_path, plot_path, report_path, trace_path, html_path)
 
     @staticmethod
     def _generate_plot(df, save_path, trace=None):

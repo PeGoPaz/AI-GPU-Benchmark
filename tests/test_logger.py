@@ -59,8 +59,8 @@ def test_to_dataframe_is_repeatable_and_read_only(telemetry_sample):
 
 def test_export_writes_csv_and_png(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, png_path, report_path, trace_path = BenchmarkLogger.export(
-        df, output_dir=str(tmp_path))
+    paths = BenchmarkLogger.export(df, output_dir=str(tmp_path))
+    csv_path, png_path, report_path, trace_path = paths.csv, paths.plot, paths.report, paths.power_trace
 
     assert report_path is None                  # no report asked for
     assert trace_path is None                   # no native trace either
@@ -94,8 +94,9 @@ def test_exported_plot_survives_a_card_without_fans(telemetry_sample, tmp_path):
 
 def test_report_is_written_beside_the_files_it_describes(telemetry_sample, tmp_path):
     df = _filled(telemetry_sample).stop()
-    csv_path, png_path, report_path, _ = BenchmarkLogger.export(
+    paths = BenchmarkLogger.export(
         df, output_dir=str(tmp_path), report={"schema_version": 1, "files": {}})
+    csv_path, png_path, report_path = paths.csv, paths.plot, paths.report
 
     with open(report_path, encoding="utf-8") as f:
         report = json.load(f)
@@ -157,3 +158,28 @@ def test_export_writes_the_trace_beside_the_telemetry(telemetry_sample, tmp_path
     assert header == "timestamp,power_w,time_sec"
     with open(paths.report, encoding="utf-8") as f:
         assert json.load(f)["files"]["power_trace"] == os.path.basename(paths.power_trace)
+
+
+def test_export_with_a_summary_writes_the_html_page(telemetry_sample, tmp_path):
+    from app.utils import report as report_module
+
+    df = _filled(telemetry_sample).stop()
+    summary = {"total_steps": 10, "requested_steps": 10, "aborted": False,
+               "elapsed_time_sec": 4.0, "steps_per_sec": 2.5}
+    rep = report_module.build_report(df, summary)
+
+    paths = BenchmarkLogger.export(df, str(tmp_path), report=rep, summary=summary)
+
+    assert paths.html.endswith(".html")
+    with open(paths.html, encoding="utf-8") as f:
+        assert f.read().startswith("<!doctype html>")
+    with open(paths.report, encoding="utf-8") as f:
+        assert json.load(f)["files"]["html"] == os.path.basename(paths.html)
+
+
+def test_export_without_a_summary_writes_no_page(telemetry_sample, tmp_path):
+    df = _filled(telemetry_sample).stop()
+
+    paths = BenchmarkLogger.export(df, str(tmp_path), report={"schema_version": 1, "files": {}})
+
+    assert paths.html is None
