@@ -5,7 +5,7 @@ line, and the run's state nowhere at all. A benchmark result is meaningless
 without the first two, and the third is the first thing anyone glancing at
 the window wants to know.
 """
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui.style import LIGHT, Palette
 from app.ui.widgets.chip import Chip
@@ -37,7 +37,7 @@ def device_details(info: dict) -> str:
 
 
 class HeaderBar(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("header")
         self._theme: Palette = LIGHT

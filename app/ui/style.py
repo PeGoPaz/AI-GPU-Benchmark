@@ -114,11 +114,6 @@ def build_qpalette(theme: Palette, standard: QPalette) -> QPalette:
 
 def build_stylesheet(theme: Palette) -> str:
     return f"""
-QLabel[role="metric"] {{
-    font-size: 14px;
-    font-weight: bold;
-}}
-
 /* Declaring a border switches Qt to the stylesheet box model, so the fill is
    exactly the colour named below. Left to the native Fusion primitive, the
    button keeps a gradient over it and #2E8B57 renders as #5BB783. */
@@ -156,10 +151,6 @@ QPushButton#btnExport:disabled {{
     color: {theme.disabled_fg};
 }}
 
-QLabel[role="metric"][warning="true"] {{
-    color: {theme.warning};
-}}
-
 QLabel#fitHint, QLabel#progressInfo {{
     color: {theme.muted};
 }}
@@ -167,6 +158,32 @@ QLabel#fitHint, QLabel#progressInfo {{
 QLabel#fitHint[warning="true"] {{
     color: {theme.warning};
     font-weight: bold;
+}}
+
+QFrame#tile {{
+    background-color: {theme.surface};
+    border: 1px solid {theme.border};
+    border-radius: 8px;
+}}
+
+QLabel#tileTitle {{
+    color: {theme.muted};
+    font-size: 10px;
+    font-weight: bold;
+}}
+
+QLabel#tileValue {{
+    color: {theme.text_strong};
+    font-size: 22px;
+    font-weight: bold;
+}}
+
+QFrame#tile[state="warn"] QLabel#tileValue {{ color: {theme.warning}; }}
+QFrame#tile[state="crit"] QLabel#tileValue {{ color: {theme.crit}; }}
+
+QLabel#tileUnit, QLabel#tileCaption {{
+    color: {theme.muted};
+    font-size: 11px;
 }}
 
 QFrame#header {{

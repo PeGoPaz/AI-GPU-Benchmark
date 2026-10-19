@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -22,7 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.telemetry import TelemetryWorker, decode_throttle_reasons
+from app.core.telemetry import TelemetryWorker
 from app.core.trainer import (
     DEFAULT_PRESET,
     MODELS,
@@ -34,10 +35,12 @@ from app.core.trainer import (
     estimate_weights_gib,
     fits_in_vram,
 )
+from app.ui import readings
 from app.ui.style import LIGHT, THEMES, build_qpalette, build_stylesheet
 from app.ui.widgets import header
 from app.ui.widgets.header import HeaderBar
 from app.ui.widgets.phase_progress import PhaseProgressBar
+from app.ui.widgets.tile import MetricTile
 from app.utils.display import RateTracker, format_progress, summary_rows
 from app.utils.logger import BenchmarkLogger
 from app.utils.plots import (
@@ -81,29 +84,23 @@ class MainWindow(QMainWindow):
         # --- LEFT PANEL: Hardware Stats & Controls ---
         left_panel = QVBoxLayout()
 
-        # 1. Hardware Dashboard
+        # 1. Hardware Dashboard: one tile per reading, in readings.TILES order.
         hw_group = QGroupBox("Live Hardware Telemetry")
-        hw_layout = QVBoxLayout()
-        self.lbl_temp = QLabel("Temp: -- °C")
-        self.lbl_mem_temp = QLabel("Mem Temp: -- °C")
-        self.lbl_headroom = QLabel("Thermal Headroom: -- °C")
-        self.lbl_power = QLabel("Power: -- W")
-        self.lbl_clock = QLabel("Clock: -- MHz")
-        self.lbl_vram = QLabel("VRAM: -- / -- MiB")
-        self.lbl_fan = QLabel("Fan: -- %")
-        self.lbl_pcie = QLabel("PCIe: --")
-        self.lbl_throttle = QLabel("Throttle: --")
-        self.lbl_throttle.setToolTip(
+        hw_layout = QGridLayout()
+        hw_layout.setSpacing(8)
+        self.tiles = {}
+        for i, (key, title, _) in enumerate(readings.TILES):
+            tile = MetricTile(title)
+            self.tiles[key] = tile
+            if key == "throttle":
+                # Reasons can run to "Power cap, Thermal": give it the width.
+                hw_layout.addWidget(tile, i // 2, 0, 1, 2)
+            else:
+                hw_layout.addWidget(tile, i // 2, i % 2)
+        self.tiles["throttle"].setToolTip(
             "Why the clock is below its maximum, straight from the driver: "
             "power cap, power brake, or thermal slowdown."
         )
-
-        for lbl in [self.lbl_temp, self.lbl_mem_temp, self.lbl_headroom,
-                    self.lbl_power, self.lbl_clock, self.lbl_vram,
-                    self.lbl_fan, self.lbl_pcie, self.lbl_throttle]:
-            lbl.setProperty("role", "metric")
-            hw_layout.addWidget(lbl)
-
         hw_group.setLayout(hw_layout)
         left_panel.addWidget(hw_group)
 
@@ -378,72 +375,8 @@ class MainWindow(QMainWindow):
         if self._vram_total_mib is None and data.get('vram_total_mb'):
             self._vram_total_mib = data['vram_total_mb']
             self._update_fit_hint()
-        self.lbl_temp.setText(f"Temp: {data['temp_gpu']} °C")
-
-        if data.get('temp_memory') is not None:
-            self.lbl_mem_temp.setText(f"Mem Temp: {data['temp_memory']:.0f} °C")
-        else:
-            self.lbl_mem_temp.setText("Mem Temp: N/A")
-
-        if data.get('temp_headroom_c') is not None:
-            self.lbl_headroom.setText(
-                f"Thermal Headroom: {data['temp_headroom_c']:.0f} °C"
-            )
-        else:
-            self.lbl_headroom.setText("Thermal Headroom: N/A")
-
-        self.lbl_power.setText(self._format_power(data))
-        self.lbl_clock.setText(f"Clock: {data['sm_clock_mhz']} MHz")
-        self.lbl_vram.setText(f"VRAM: {data['vram_used_mb']} / {data['vram_total_mb']} MiB")
-        self.lbl_fan.setText(self._format_fan(data))
-        self.lbl_pcie.setText(self._format_pcie(data))
-        self._show_throttle(data.get('throttle_reasons'))
-
-    def _show_throttle(self, mask):
-        reasons = decode_throttle_reasons(mask)
-        if mask is None:
-            self.lbl_throttle.setText("Throttle: N/A")
-        else:
-            self.lbl_throttle.setText(f"Throttle: {', '.join(reasons) or 'none'}")
-
-        # Re-polished only on a change of state: this runs four times a second.
-        throttled = bool(reasons)
-        if self.lbl_throttle.property("warning") != throttled:
-            self.lbl_throttle.setProperty("warning", throttled)
-            self.lbl_throttle.style().unpolish(self.lbl_throttle)
-            self.lbl_throttle.style().polish(self.lbl_throttle)
-
-    @staticmethod
-    def _format_power(data: dict) -> str:
-        # The poll's reading is smoothed; the peak, when the native sampler
-        # supplies it, is the highest instant reading since the last poll.
-        peak = data.get('power_peak_w')
-        if peak is None:
-            return f"Power: {data['power_w']} W"
-        return f"Power: {data['power_w']} W (peak {peak:.0f} W)"
-
-    @staticmethod
-    def _format_fan(data: dict) -> str:
-        pct, rpm = data.get('fan_speed_pct'), data.get('fan_rpm')
-        if pct is None:
-            return "Fan: N/A"
-        if rpm:
-            return f"Fan: {pct:.0f}% ({rpm} RPM)"
-        return f"Fan: {pct:.0f}%"
-
-    @staticmethod
-    def _format_pcie(data: dict) -> str:
-        gen, width = data.get('pcie_gen'), data.get('pcie_width')
-        if gen is None or width is None:
-            return "PCIe: N/A"
-
-        text = f"PCIe: Gen{gen} x{width}"
-        gen_max, width_max = data.get('pcie_gen_max'), data.get('pcie_width_max')
-        # Only worth showing when the link is downshifted — otherwise it is
-        # noise repeating what the current values already say.
-        if gen_max and width_max and (gen, width) != (gen_max, width_max):
-            text += f" (max Gen{gen_max} x{width_max})"
-        return text
+        for key, _, read in readings.TILES:
+            self.tiles[key].set_reading(read(data))
 
     # --- theme & persisted settings --------------------------------------------
 

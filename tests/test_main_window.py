@@ -70,16 +70,16 @@ def window(qapp, monkeypatch, tmp_path):
 
 def test_telemetry_labels_show_new_metrics(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(9))
-    assert "89" in window.lbl_mem_temp.text()
-    assert "16" in window.lbl_headroom.text()
+    assert window.tiles["temp"].caption_text() == "memory 89 °C"
+    assert window.tiles["headroom"].value_text() == "16"
 
 
 def test_unsupported_fields_render_na(window, telemetry_sample):
     """GPUs without the memory-temp field must show N/A, not crash."""
     window.update_telemetry_ui(
         telemetry_sample(0, temp_memory=None, temp_headroom_c=None))
-    assert "N/A" in window.lbl_mem_temp.text()
-    assert "N/A" in window.lbl_headroom.text()
+    assert window.tiles["temp"].caption_text() == ""
+    assert window.tiles["headroom"].value_text() == "N/A"
 
 
 def _summary_rows(window):
@@ -190,15 +190,17 @@ def test_repeated_telemetry_errors_are_logged_once(window):
 def test_fan_and_pcie_labels_render(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(0))
 
-    assert window.lbl_fan.text() == "Fan: 60% (1800 RPM)"
-    assert window.lbl_pcie.text() == "PCIe: Gen4 x16"
+    assert (window.tiles["fan"].value_text(), window.tiles["fan"].caption_text()) == ("60", "1800 RPM")
+    assert window.tiles["pcie"].value_text() == "Gen4 x16"
+    assert window.tiles["pcie"].caption_text() == ""
 
 
 def test_downshifted_pcie_link_shows_the_maximum(window, telemetry_sample):
     """Gen1 at idle is normal — without the max it reads as a broken slot."""
     window.update_telemetry_ui(telemetry_sample(0, pcie_gen=1))
 
-    assert window.lbl_pcie.text() == "PCIe: Gen1 x16 (max Gen4 x16)"
+    assert window.tiles["pcie"].value_text() == "Gen1 x16"
+    assert window.tiles["pcie"].caption_text() == "max Gen4 x16"
 
 
 def test_card_without_fans_or_pcie_data_renders_na(window, telemetry_sample):
@@ -206,8 +208,8 @@ def test_card_without_fans_or_pcie_data_renders_na(window, telemetry_sample):
                                                 fan_rpm=None, pcie_gen=None,
                                                 pcie_width=None))
 
-    assert window.lbl_fan.text() == "Fan: N/A"
-    assert window.lbl_pcie.text() == "PCIe: N/A"
+    assert window.tiles["fan"].value_text() == "N/A"
+    assert window.tiles["pcie"].value_text() == "N/A"
 
 
 def test_summary_reports_peak_fan_and_link(window, telemetry_sample):
@@ -491,18 +493,18 @@ def test_throttle_label_names_the_reason(window, telemetry_sample):
     from app.core.telemetry import THROTTLE_SW_POWER_CAP
 
     window.update_telemetry_ui(telemetry_sample(0, throttle_reasons=THROTTLE_SW_POWER_CAP))
-    assert window.lbl_throttle.text() == "Throttle: Power cap"
-    assert window.lbl_throttle.property("warning") is True
+    assert window.tiles["throttle"].value_text() == "Power cap"
+    assert window.tiles["throttle"].state() == "warn"
 
     window.update_telemetry_ui(telemetry_sample(1, throttle_reasons=0))
-    assert window.lbl_throttle.text() == "Throttle: none"
-    assert window.lbl_throttle.property("warning") is False
+    assert window.tiles["throttle"].value_text() == "None"
+    assert window.tiles["throttle"].state() == "normal"
 
 
 def test_throttle_label_without_driver_support(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(0, throttle_reasons=None))
 
-    assert window.lbl_throttle.text() == "Throttle: N/A"
+    assert window.tiles["throttle"].value_text() == "N/A"
 
 
 def test_summary_reports_time_spent_throttled(window, telemetry_sample):
@@ -757,10 +759,11 @@ def test_failed_run_exports_telemetry_without_a_report(started_run, telemetry_sa
 
 def test_power_label_shows_the_native_peak(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(0, power_w=180.0, power_peak_w=262.4))
-    assert window.lbl_power.text() == "Power: 180.0 W (peak 262 W)"
+    assert window.tiles["power"].value_text() == "180"
+    assert window.tiles["power"].caption_text() == "peak 262 W"
 
     window.update_telemetry_ui(telemetry_sample(1, power_w=180.0, power_peak_w=None))
-    assert window.lbl_power.text() == "Power: 180.0 W"
+    assert window.tiles["power"].caption_text() == "250 ms average"
 
 
 def test_sampler_status_is_logged(window):
@@ -848,3 +851,22 @@ def test_header_says_when_there_is_no_gpu(window):
 
     assert window.header.lbl_gpu.text() == "No NVIDIA GPU detected"
     assert "no driver" in window.header.lbl_details.text()
+
+
+
+def test_hot_card_turns_its_tile_red(window, telemetry_sample):
+    from PyQt6.QtGui import QColor
+
+    from app.ui.style import LIGHT
+
+    window.update_telemetry_ui(telemetry_sample(0, temp_gpu=91))
+    tile = window.tiles["temp"]
+
+    assert tile.state() == "crit"
+    assert tile.lbl_value.palette().color(tile.lbl_value.foregroundRole()) == QColor(LIGHT.crit)
+
+
+def test_every_reading_has_a_tile(window):
+    from app.ui import readings
+
+    assert list(window.tiles) == [key for key, _, _ in readings.TILES]

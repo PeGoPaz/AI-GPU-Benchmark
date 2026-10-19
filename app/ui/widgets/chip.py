@@ -12,7 +12,8 @@ from PyQt6.QtWidgets import QSizePolicy, QWidget
 class Chip(QWidget):
     PAD_X, PAD_Y = 10, 3
 
-    def __init__(self, text: str = "", color: str = "#888888", parent=None):
+    def __init__(self, text: str = "", color: str = "#888888",
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._text = text
         self._color = color

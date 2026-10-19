@@ -17,7 +17,7 @@ IDLE, LOADING, WARMUP, MEASURING, DONE = "idle", "loading", "warm-up", "measurin
 
 
 class PhaseProgressBar(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(28)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
