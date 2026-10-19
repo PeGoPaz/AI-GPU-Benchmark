@@ -63,7 +63,6 @@ Self-contained, a file or two each. Good first PRs.
 Everything here reads the JSON run report (`report_<timestamp>.json`), so it works the same for runs from the window and from `--headless`.
 
 - **Multi-run mode.** Three to five runs back to back, averaged, outliers dropped — the only way the numbers really mean anything. `HeadlessRun` in `app/cli.py` already does one run end to end, so a `--repeat N` is mostly orchestration plus a combined report.
-- **Run comparison.** Load two or more reports and show them side by side: tokens/sec, est. TFLOPS, tokens/J, time power- and thermal-limited. The report names its CSV, so the curves of a previous run can be drawn behind the current ones as well.
 - **A results table from real cards.** Run the four presets headless on a handful of rented cloud GPUs and publish the reports with a table in the README. Numbers from actual hardware are worth more than any feature on this list.
 
 ### 3. The native module

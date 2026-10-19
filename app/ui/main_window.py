@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -41,6 +42,7 @@ from app.core.trainer import (
 )
 from app.ui import icons, readings
 from app.ui.about import AboutDialog, about_rows, app_icon
+from app.ui.compare_window import CompareWindow, load_runs
 from app.ui.live_charts import LiveCharts
 from app.ui.style import (
     LIGHT,
@@ -361,6 +363,14 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([440, 920])
 
         # Menu: the theme is a preference, not a benchmark setting.
+        file_menu = self.menuBar().addMenu("&File")
+        self.act_compare = QAction("&Compare runs…", self)
+        self.act_compare.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        self.act_compare.setToolTip("Open several exported run reports side by side")
+        self.act_compare.triggered.connect(self.compare_runs)
+        file_menu.addAction(self.act_compare)
+        self._compare_windows = []
+
         run_menu = self.menuBar().addMenu("&Run")
         for action in (self.act_start, self.act_stop, self.act_export, self.act_open_report):
             run_menu.addAction(action)
@@ -937,6 +947,23 @@ class MainWindow(QMainWindow):
         if paths.html:
             self._last_html = paths.html
             self.act_open_report.setEnabled(True)
+
+    def compare_runs(self, paths=None):
+        """Opens a comparison of the chosen reports; asks for them if not given."""
+        if not paths:
+            paths, _ = QFileDialog.getOpenFileNames(
+                self, "Compare runs", "logs", "Run reports (report_*.json);;JSON (*.json)")
+        if not paths:
+            return None
+        runs, errors = load_runs(list(paths))
+        if not runs:
+            self.log_to_console("Compare runs: " + "; ".join(errors))
+            return None
+        window = CompareWindow(runs, errors, self._theme)
+        # Kept, or Python would collect the window the moment this returns.
+        self._compare_windows.append(window)
+        window.show()
+        return window
 
     def open_report(self):
         if self._last_html:

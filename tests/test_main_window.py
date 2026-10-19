@@ -1211,3 +1211,35 @@ def test_open_report_opens_the_exported_page(window, telemetry_sample, tmp_path,
     assert len(opened) == 1
     assert opened[0].toLocalFile().endswith(".html")
     assert os.path.isfile(opened[0].toLocalFile())
+
+
+# --- compare runs ----------------------------------------------------------------------
+
+def test_compare_opens_a_window_for_the_chosen_reports(window, telemetry_sample, tmp_path,
+                                                       monkeypatch):
+    import shutil
+
+    import app.ui.main_window as mw
+
+    monkeypatch.chdir(tmp_path)
+    _finish_run(window, telemetry_sample)
+    window.export_results()
+    [first] = (tmp_path / "logs").glob("report_*.json")
+    second = first.with_name("report_baseline.json")
+    shutil.copy(first, second)                          # same CSV, second report
+    reports = [str(first), str(second)]
+    monkeypatch.setattr(mw.QFileDialog, "getOpenFileNames", lambda *a, **k: (reports, ""))
+
+    window.act_compare.trigger()
+
+    [compare] = window._compare_windows
+    assert compare.table.columnCount() == 2
+    compare.close()
+
+
+def test_compare_with_nothing_usable_says_so_and_opens_nothing(window, tmp_path):
+    bad = tmp_path / "report_bad.json"
+    bad.write_text("{ nope", encoding="utf-8")
+
+    assert window.compare_runs([str(bad)]) is None
+    assert "not valid JSON" in window.console.toPlainText()
