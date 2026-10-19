@@ -12,7 +12,7 @@ throttle shading are the same on both, taken from the same constants.
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QObject, QPointF, Qt
 from PyQt6.QtWidgets import QTabWidget, QWidget
 
 from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
@@ -78,8 +78,10 @@ class LiveCharts(QTabWidget):
 
         # --- Telemetry: two plots stacked, one shared time axis ----------------------
         self.telemetry_view = pg.GraphicsLayoutWidget()
-        self.thermal_plot = self.telemetry_view.addPlot(row=0, col=0)
-        self.util_plot = self.telemetry_view.addPlot(row=1, col=0)
+        # Row 0: the crosshair readout; the plots below it.
+        self.readout = self.telemetry_view.addLabel("", row=0, col=0, justify="left")
+        self.thermal_plot = self.telemetry_view.addPlot(row=1, col=0)
+        self.util_plot = self.telemetry_view.addPlot(row=2, col=0)
         self.util_plot.setXLink(self.thermal_plot)
         for plot in (self.thermal_plot, self.util_plot):
             plot.showGrid(x=True, y=True, alpha=0.2)
@@ -129,6 +131,23 @@ class LiveCharts(QTabWidget):
         self.loss_plot.addItem(self.warmup_line)
         self.warmup_line.hide()
 
+        # --- Crosshair: one vertical line through both plots, values above ----------
+        self._shown: dict[str, np.ndarray] = {}
+        self.crosshairs = []
+        for plot in (self.thermal_plot, self.util_plot):
+            line = pg.InfiniteLine(angle=90, movable=False,
+                                   pen=_pen("#888888", 1, Qt.PenStyle.DashLine))
+            line.hide()
+            plot.addItem(line, ignoreBounds=True)
+            self.crosshairs.append(line)
+        scene = self.telemetry_view.scene()
+        if scene is not None:
+            # Rate-limited: mouse moves arrive far faster than a label can be
+            # read, and each one costs a search and an HTML re-render.
+            self._mouse_proxy = pg.SignalProxy(scene.sigMouseMoved, rateLimit=60,
+                                               slot=self._on_mouse_moved)
+        self.telemetry_view.viewport().installEventFilter(self)
+
         self.addTab(self.telemetry_view, "Telemetry")
         self.addTab(self.loss_view, "Loss")
         self.set_theme(LIGHT)
@@ -150,6 +169,8 @@ class LiveCharts(QTabWidget):
         if hasattr(self, "warmup_line"):
             self.warmup_line.hide()
             self._set_spans([])
+            self._shown = {}
+            self.hide_crosshair()
 
     def set_warmup(self, steps: int) -> None:
         self._warmup = steps
@@ -190,13 +211,15 @@ class LiveCharts(QTabWidget):
     def refresh(self) -> None:
         """Pushes what has been collected into the curves. Cheap: no redraw."""
         r = self._rows
-        t = np.asarray(r["t"], dtype=float)
-        self.curves[TEMP].setData(t, np.asarray(r["temp"], dtype=float))
-        self.curves[POWER].setData(t, np.asarray(r["power"], dtype=float))
-        self.curves[UTIL].setData(t, np.asarray(r["util"], dtype=float))
-        self.curves[CLOCK].setData(t, np.asarray(r["clock"], dtype=float))
-        fan = np.asarray(r["fan"], dtype=float)
-        self._set_fan(t, fan)
+        self._show({
+            "t": np.asarray(r["t"], dtype=float),
+            "temp": np.asarray(r["temp"], dtype=float),
+            "power": np.asarray(r["power"], dtype=float),
+            "util": np.asarray(r["util"], dtype=float),
+            "fan": np.asarray(r["fan"], dtype=float),
+            "clock": np.asarray(r["clock"], dtype=float),
+        })
+        t = self._shown["t"]
         if self._trace_t:
             self._set_instant(np.concatenate(self._trace_t), np.concatenate(self._trace_w))
         self._shade(pd.DataFrame({"time_sec": t, "throttle_reasons": r["throttle"]}))
@@ -205,19 +228,31 @@ class LiveCharts(QTabWidget):
     def show_run(self, df: pd.DataFrame, trace: pd.DataFrame | None = None) -> None:
         """The final draw from the logger's complete data, as the export has it."""
         t = df["time_sec"].to_numpy(dtype=float)
-        self.curves[TEMP].setData(t, df["temp_gpu"].to_numpy(dtype=float))
-        self.curves[POWER].setData(t, df["power_w"].to_numpy(dtype=float))
-        self.curves[UTIL].setData(t, df["gpu_util_pct"].to_numpy(dtype=float))
-        self.curves[CLOCK].setData(t, df["sm_clock_mhz"].to_numpy(dtype=float))
-        fan = (df["fan_speed_pct"].to_numpy(dtype=float) if "fan_speed_pct" in df.columns
-               else np.full(len(t), np.nan))
-        self._set_fan(t, fan)
+        self._show({
+            "t": t,
+            "temp": df["temp_gpu"].to_numpy(dtype=float),
+            "power": df["power_w"].to_numpy(dtype=float),
+            "util": df["gpu_util_pct"].to_numpy(dtype=float),
+            "fan": (df["fan_speed_pct"].to_numpy(dtype=float) if "fan_speed_pct" in df.columns
+                    else np.full(len(t), np.nan)),
+            "clock": df["sm_clock_mhz"].to_numpy(dtype=float),
+        })
         if trace is not None and len(trace):
             self._set_instant(*envelope(trace["time_sec"], trace["power_w"]))
         else:
             self._set_instant(np.array([]), np.array([]))
         self._shade(df)
         self._draw_loss()
+
+    def _show(self, data: dict[str, np.ndarray]) -> None:
+        """Sets every telemetry curve, and keeps the arrays for the crosshair."""
+        self._shown = data
+        t = data["t"]
+        self.curves[TEMP].setData(t, data["temp"])
+        self.curves[POWER].setData(t, data["power"])
+        self.curves[UTIL].setData(t, data["util"])
+        self.curves[CLOCK].setData(t, data["clock"])
+        self._set_fan(t, data["fan"])
 
     def _set_fan(self, t: np.ndarray, fan: np.ndarray) -> None:
         # Absent on passively cooled cards: no curve at all, not a flat zero.
@@ -269,6 +304,60 @@ class LiveCharts(QTabWidget):
 
     def loss_data(self) -> tuple[list[int], list[float]]:
         return list(self._loss_steps), list(self._loss_values)
+
+    # --- crosshair --------------------------------------------------------------------------
+
+    def _readout_parts(self, x: float) -> list[tuple[str, str]] | None:
+        """(text, colour) pieces for the sample nearest to time x, or None."""
+        shown = self._shown
+        if not shown or len(shown["t"]) == 0:
+            return None
+        t = shown["t"]
+        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
+        if i > 0 and abs(t[i - 1] - x) < abs(t[i] - x):
+            i -= 1
+        parts = [(f"t {t[i]:.1f} s", self._theme.chart_fg),
+                 (f"{shown['temp'][i]:.0f} °C", TEMP_COLOR),
+                 (f"{shown['power'][i]:.0f} W", POWER_COLOR),
+                 (f"util {shown['util'][i]:.0f} %", UTIL_COLOR)]
+        if np.isfinite(shown["fan"][i]):
+            parts.append((f"fan {shown['fan'][i]:.0f} %", FAN_COLOR))
+        parts.append((f"{shown['clock'][i]:.0f} MHz", CLOCK_COLOR))
+        return parts
+
+    def readout_text(self, x: float) -> str:
+        parts = self._readout_parts(x)
+        return "   ".join(text for text, _ in parts) if parts else ""
+
+    def show_crosshair(self, x: float) -> None:
+        parts = self._readout_parts(x)
+        if parts is None:
+            self.hide_crosshair()
+            return
+        for line in self.crosshairs:
+            line.setValue(x)
+            line.show()
+        html = "&nbsp;&nbsp;&nbsp;".join(
+            f"<span style='color:{color}'>{text}</span>" for text, color in parts)
+        self.readout.setText(html)
+
+    def hide_crosshair(self) -> None:
+        for line in self.crosshairs:
+            line.hide()
+        self.readout.setText("")
+
+    def _on_mouse_moved(self, event) -> None:
+        pos = event[0]
+        for plot in (self.thermal_plot, self.util_plot):
+            if plot.sceneBoundingRect().contains(pos):
+                self.show_crosshair(plot.vb.mapSceneToView(QPointF(pos)).x())
+                return
+        self.hide_crosshair()
+
+    def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:
+        if event is not None and event.type() == QEvent.Type.Leave:
+            self.hide_crosshair()
+        return super().eventFilter(watched, event)
 
     # --- theme ----------------------------------------------------------------------------
 

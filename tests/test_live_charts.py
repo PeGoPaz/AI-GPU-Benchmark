@@ -133,3 +133,66 @@ def test_theme_recolours_every_legend_label(charts):
     # pyqtgraph renders the colour into each label's HTML.
     for _, label in charts.thermal_plot.legend.items:
         assert f"color:{DARK.chart_fg.lower()}" in label.item.toHtml().replace(" ", "").lower()
+
+
+# --- crosshair ----------------------------------------------------------------------
+
+def _fed(charts, telemetry_sample, n=10, **overrides):
+    for i in range(n):
+        charts.append(telemetry_sample(i, **overrides))
+    charts.refresh()
+
+
+def test_readout_lists_every_series_at_the_nearest_sample(charts, telemetry_sample):
+    _fed(charts, telemetry_sample)
+
+    assert charts.readout_text(3.4) == ("t 3.0 s   68 °C   253 W   util 98 %   "
+                                        "fan 63 %   2600 MHz")
+
+
+def test_readout_skips_a_fan_the_card_does_not_have(charts, telemetry_sample):
+    _fed(charts, telemetry_sample, fan_speed_pct=None)
+
+    assert "fan" not in charts.readout_text(2.0)
+
+
+def test_crosshair_runs_through_both_plots(charts, telemetry_sample):
+    _fed(charts, telemetry_sample)
+
+    charts.show_crosshair(5.0)
+
+    assert all(line.isVisible() and line.value() == 5.0 for line in charts.crosshairs)
+    assert "t 5.0 s" in charts.readout.text
+
+    charts.hide_crosshair()
+    assert not any(line.isVisible() for line in charts.crosshairs)
+    assert charts.readout.text == ""
+
+
+def test_crosshair_before_any_data_stays_hidden(charts):
+    charts.show_crosshair(5.0)
+
+    assert not any(line.isVisible() for line in charts.crosshairs)
+
+
+def test_mouse_over_a_plot_moves_the_crosshair(charts, telemetry_sample):
+    from PyQt6.QtCore import QPointF
+
+    _fed(charts, telemetry_sample)
+    charts.show()
+    charts.thermal_plot.setXRange(0, 9, padding=0)
+    scene_pos = charts.thermal_plot.vb.mapViewToScene(QPointF(6.0, 70.0))
+
+    charts._on_mouse_moved((scene_pos,))
+
+    assert charts.crosshairs[0].value() == pytest.approx(6.0, abs=0.05)
+
+
+def test_a_new_run_clears_the_crosshair(charts, telemetry_sample):
+    _fed(charts, telemetry_sample)
+    charts.show_crosshair(4.0)
+
+    charts.reset()
+
+    assert charts.readout_text(4.0) == ""
+    assert not any(line.isVisible() for line in charts.crosshairs)
