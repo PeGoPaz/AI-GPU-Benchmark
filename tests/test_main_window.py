@@ -970,3 +970,64 @@ def test_details_table_is_folded_away_until_asked_for(window, telemetry_sample):
 
     window.btn_details.setChecked(False)
     assert window.summary_table.isHidden()
+
+
+# --- layout ----------------------------------------------------------------------------
+
+def test_left_column_scrolls_instead_of_stretching_the_window(window):
+    from PyQt6.QtWidgets import QScrollArea
+
+    left = window.main_splitter.widget(0)
+    assert isinstance(left, QScrollArea)
+    assert left.widgetResizable()
+
+
+def test_charts_summary_and_log_share_one_splitter(window):
+    splitter = window.right_splitter
+
+    assert [splitter.widget(i) for i in range(splitter.count())] == [
+        window.charts, window.summary_group, window.log_panel]
+    assert not splitter.isCollapsible(0)          # the charts never vanish
+    assert splitter.isCollapsible(2)              # the log may be dragged shut
+
+
+def test_log_can_be_hidden_from_the_view_menu(window):
+    window.act_log.setChecked(False)
+    assert window.log_panel.isHidden()
+
+    window.act_log.setChecked(True)
+    assert not window.log_panel.isHidden()
+
+
+def test_layout_is_remembered(window, tmp_path):
+    # Inside the offscreen platform's 800×600 screen: restoreGeometry clamps
+    # a window to the screen it lands on.
+    window.resize(780, 560)
+    window.show()
+    window.main_splitter.setSizes([400, 380])
+    window.act_log.setChecked(False)
+    saved_split = window.main_splitter.saveState()
+
+    reopened = _reopen(window, tmp_path)
+
+    assert reopened.main_splitter.saveState() == saved_split
+    assert not reopened.act_log.isChecked()
+    assert reopened.size().width() == 780
+
+
+def test_corrupt_layout_settings_are_ignored(tmp_path, qapp, monkeypatch):
+    import pynvml
+
+    from app.ui.main_window import MainWindow
+    monkeypatch.setattr(pynvml, "nvmlInit",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
+    settings = _scratch_settings(tmp_path)
+    settings.setValue("ui/geometry", "not a geometry")
+    settings.setValue("ui/main_splitter", 42)
+    settings.sync()
+
+    win = MainWindow(settings=_scratch_settings(tmp_path))
+    win.telemetry.stop()
+
+    assert win.main_splitter.count() == 2
+    win.close()

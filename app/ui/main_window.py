@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QSettings, Qt, QTimer, pyqtSlot
+from PyQt6.QtCore import QByteArray, QSettings, Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
@@ -12,7 +12,10 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -61,7 +64,7 @@ class MainWindow(QMainWindow):
         self.settings = settings if settings is not None else QSettings(
             SETTINGS_ORG, SETTINGS_APP)
         self.setWindowTitle("AI GPU Benchmark — detecting GPU…")
-        self.resize(800, 650)
+        self.resize(1360, 900)              # until a saved geometry says otherwise
 
         # Main Layout: the header across the top, the two panels below it.
         central_widget = QWidget()
@@ -71,9 +74,12 @@ class MainWindow(QMainWindow):
         outer_layout.setSpacing(0)
         self.header = HeaderBar()
         outer_layout.addWidget(self.header)
-        body = QWidget()
-        outer_layout.addWidget(body, 1)
-        main_layout = QHBoxLayout(body)
+        # Left | right, resizable; the left column scrolls when it outgrows
+        # the window instead of forcing the window to grow.
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setObjectName("mainSplitter")
+        self.main_splitter.setChildrenCollapsible(False)
+        outer_layout.addWidget(self.main_splitter, 1)
 
         # --- LEFT PANEL: Hardware Stats & Controls ---
         left_panel = QVBoxLayout()
@@ -220,7 +226,6 @@ class MainWindow(QMainWindow):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
-        self.console.setMaximumHeight(180)
         self.log_to_console("System initialized. Ready for benchmark.")
 
         self.phase_bar = PhaseProgressBar()
@@ -265,15 +270,53 @@ class MainWindow(QMainWindow):
         self.summary_group.setLayout(summary_layout)
         self.summary_group.setVisible(False)
 
-        right_panel.addWidget(QLabel("Execution Log:"))
-        right_panel.addWidget(self.console)
+        # Progress on top; below it charts, summary and log share the height
+        # through a splitter, the log last — it is the least read of the three
+        # and can be dragged shut or hidden from the View menu.
+        self.log_panel = QWidget()
+        log_layout = QVBoxLayout(self.log_panel)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.addWidget(QLabel("Execution Log:"))
+        log_layout.addWidget(self.console)
+
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setObjectName("rightSplitter")
+        self.right_splitter.addWidget(self.charts)
+        self.right_splitter.addWidget(self.summary_group)
+        self.right_splitter.addWidget(self.log_panel)
+        self.right_splitter.setCollapsible(0, False)
+        # Spare height goes to the charts; the summary and the log take what
+        # their content asks for. The summary appearing at the end of a run
+        # would otherwise squeeze the charts to make room for itself.
+        self.right_splitter.setStretchFactor(0, 1)
+        self.right_splitter.setStretchFactor(1, 0)
+        self.right_splitter.setStretchFactor(2, 0)
+        self.summary_group.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                         QSizePolicy.Policy.Maximum)
+        self.console.setMinimumHeight(60)
+        self._default_split_pending = True     # cleared when a saved split is restored
+
         right_panel.addWidget(self.phase_bar)
         right_panel.addWidget(self.lbl_progress)
-        right_panel.addWidget(self.charts, 2)
-        right_panel.addWidget(self.summary_group)
+        right_panel.addWidget(self.right_splitter, 1)
 
-        main_layout.addLayout(left_panel, 1)
-        main_layout.addLayout(right_panel, 2)
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_scroll = QScrollArea()
+        left_scroll.setObjectName("leftScroll")
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        left_scroll.setWidget(left_widget)
+        left_scroll.setMinimumWidth(400)
+
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+        self.main_splitter.addWidget(left_scroll)
+        self.main_splitter.addWidget(right_widget)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter.setSizes([440, 920])
 
         # Menu: the theme is a preference, not a benchmark setting.
         view_menu = self.menuBar().addMenu("&View")
@@ -281,6 +324,11 @@ class MainWindow(QMainWindow):
         self.act_dark.setCheckable(True)
         self.act_dark.toggled.connect(self._on_dark_toggled)
         view_menu.addAction(self.act_dark)
+        self.act_log = QAction("Execution &log", self)
+        self.act_log.setCheckable(True)
+        self.act_log.setChecked(True)
+        self.act_log.toggled.connect(self.log_panel.setVisible)
+        view_menu.addAction(self.act_log)
 
         # Applied last, so every widget above is polished in one pass.
         self._theme = LIGHT
@@ -439,6 +487,10 @@ class MainWindow(QMainWindow):
         s.setValue("workload/seq_len", self.cmb_seq_len.currentData())
         s.setValue("workload/gradient_checkpointing", self.chk_checkpointing.isChecked())
         s.setValue("workload/warmup_steps", self.spin_warmup.value())
+        s.setValue("ui/geometry", self.saveGeometry())
+        s.setValue("ui/main_splitter", self.main_splitter.saveState())
+        s.setValue("ui/right_splitter", self.right_splitter.saveState())
+        s.setValue("ui/show_log", self.act_log.isChecked())
         s.sync()
 
     def _setting_int(self, key: str, default: int) -> int:
@@ -486,6 +538,19 @@ class MainWindow(QMainWindow):
             self._setting_int("workload/warmup_steps", self.spin_warmup.value()))
         # setChecked fires toggled, which applies the theme.
         self.act_dark.setChecked(s.value("ui/theme", "light", type=str) == "dark")
+        self._restore_layout()
+
+    def _restore_layout(self):
+        """Window size and panel splits as they were left. A missing or
+        corrupt value is ignored: the defaults set in __init__ stand."""
+        s = self.settings
+        for key, restore in (("ui/geometry", self.restoreGeometry),
+                             ("ui/main_splitter", self.main_splitter.restoreState),
+                             ("ui/right_splitter", self.right_splitter.restoreState)):
+            value = s.value(key)
+            if isinstance(value, QByteArray) and restore(value) and key == "ui/right_splitter":
+                self._default_split_pending = False
+        self.act_log.setChecked(s.value("ui/show_log", True, type=bool))
 
     def _apply_preset(self, preset):
         """Writes a preset into the fields without bouncing back to Custom."""
@@ -738,6 +803,20 @@ class MainWindow(QMainWindow):
         for path in paths:
             if path:
                 self.log_to_console(f"Exported: {path}")
+
+    def showEvent(self, event):
+        """First show without a saved layout: most of the height to the charts.
+
+        Done here rather than in __init__ because a splitter only knows its
+        real height once the window is on screen.
+        """
+        super().showEvent(event)
+        if self._default_split_pending:
+            self._default_split_pending = False
+            total = max(1, sum(self.right_splitter.sizes()))
+            summary = self.summary_group.sizeHint().height()
+            log = int(total * 0.18)
+            self.right_splitter.setSizes([total - summary - log, summary, log])
 
     def closeEvent(self, event):
         """Clean up threads on exit."""
