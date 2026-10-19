@@ -14,6 +14,8 @@ def phase_bar(qapp):
 
 
 def _pixel(widget, x_fraction):
+    """The colour at a fraction of the width, on the vertical centre line.
+    Keep x_fraction away from 0.5 for widgets that draw centred text."""
     image = widget.grab().toImage()
     return image.pixelColor(int(image.width() * x_fraction), image.height() // 2)
 
@@ -76,7 +78,9 @@ def test_theme_switch_recolours_the_bar(phase_bar):
     phase_bar.set_step(10)
     phase_bar.set_theme(DARK)
 
-    assert _pixel(phase_bar, 0.5) == QColor(DARK.ok)
+    # Well clear of the centred label: its width depends on the platform's
+    # fonts, and on Linux it covers the middle of the bar.
+    assert _pixel(phase_bar, 0.9) == QColor(DARK.ok)
 
 
 # --- header bar ---------------------------------------------------------------------
