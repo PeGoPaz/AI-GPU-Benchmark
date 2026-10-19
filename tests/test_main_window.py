@@ -988,7 +988,7 @@ def test_charts_summary_and_log_share_one_splitter(window):
     splitter = window.right_splitter
 
     assert [splitter.widget(i) for i in range(splitter.count())] == [
-        window.charts, window.summary_group, window.log_panel]
+        window.chart_stack, window.summary_group, window.log_panel]
     assert not splitter.isCollapsible(0)          # the charts never vanish
     assert splitter.isCollapsible(2)              # the log may be dragged shut
 
@@ -1009,12 +1009,13 @@ def test_layout_is_remembered(window, tmp_path):
     window.main_splitter.setSizes([400, 380])
     window.act_log.setChecked(False)
     saved_split = window.main_splitter.saveState()
+    saved_size = window.size()          # whatever the minimum sizes allowed
 
     reopened = _reopen(window, tmp_path)
 
     assert reopened.main_splitter.saveState() == saved_split
     assert not reopened.act_log.isChecked()
-    assert reopened.size().width() == 780
+    assert reopened.size() == saved_size
 
 
 def test_corrupt_layout_settings_are_ignored(tmp_path, qapp, monkeypatch):
@@ -1243,3 +1244,42 @@ def test_compare_with_nothing_usable_says_so_and_opens_nothing(window, tmp_path)
 
     assert window.compare_runs([str(bad)]) is None
     assert "not valid JSON" in window.console.toPlainText()
+
+
+
+# --- empty states -------------------------------------------------------------------------
+
+def test_fresh_window_explains_how_to_get_charts(window):
+    assert window.chart_stack.currentWidget() is window.empty_charts
+    assert "press Start" in window.empty_charts.hint()
+    assert window.summary_stack.currentWidget() is window.empty_summary
+    assert not window.summary_group.isHidden()
+
+
+def test_no_gpu_turns_the_hint_into_what_still_works(window):
+    window._on_telemetry_error("NVML Initialization Failed: no driver")
+
+    assert window.empty_charts.title() == "No NVIDIA GPU detected"
+    assert "Compare runs" in window.empty_charts.hint()
+
+
+def test_starting_a_run_swaps_the_placeholders(started_run):
+    assert started_run.chart_stack.currentWidget() is started_run.charts
+    assert started_run.empty_summary.title() == "Running…"
+
+
+def test_finished_run_shows_its_results(started_run, telemetry_sample):
+    started_run.update_telemetry_ui(telemetry_sample(0))
+    started_run.trainer.training_finished.emit({
+        "total_steps": 150, "requested_steps": 150, "aborted": False,
+        "elapsed_time_sec": 70.0, "steps_per_sec": 2.14,
+    })
+
+    assert started_run.summary_stack.currentWidget() is started_run._results_page
+
+
+def test_failed_run_says_so_where_results_would_be(started_run):
+    started_run.trainer.error_occurred.emit("HF Training Error: boom")
+
+    assert started_run.summary_stack.currentWidget() is started_run.empty_summary
+    assert started_run.empty_summary.title() == "The run failed"

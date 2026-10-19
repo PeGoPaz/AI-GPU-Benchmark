@@ -204,6 +204,16 @@ QToolButton#detailsToggle {{
     font-weight: bold;
 }}
 
+QLabel#emptyTitle {{
+    color: {theme.text_strong};
+    font-size: 16px;
+    font-weight: bold;
+}}
+
+QLabel#emptyHint {{
+    color: {theme.muted};
+}}
+
 QFrame#header {{
     background-color: {theme.surface};
     border-bottom: 1px solid {theme.border};

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -53,6 +54,7 @@ from app.ui.style import (
     build_stylesheet,
 )
 from app.ui.widgets import header
+from app.ui.widgets.empty_state import EmptyState
 from app.ui.widgets.gauge import ArcGauge
 from app.ui.widgets.header import HeaderBar
 from app.ui.widgets.phase_progress import PhaseProgressBar
@@ -277,10 +279,18 @@ class MainWindow(QMainWindow):
         self.lbl_progress = QLabel("")
         self.lbl_progress.setObjectName("progressInfo")
 
-        # Live charts: telemetry (two plots on one time axis) and loss.
+        # Live charts: telemetry (two plots on one time axis) and loss — or,
+        # before the first run, a note on how to get some.
         self.charts = LiveCharts()
         self.charts.setMinimumHeight(320)
-        self.charts.setVisible(False)
+        self.empty_charts = EmptyState(
+            "No run yet",
+            "Pick a preset and press Start (Ctrl+R) — live charts appear here. "
+            "The telemetry on the left is already live.",
+            app_icon().pixmap(56, 56))
+        self.chart_stack = QStackedWidget()
+        self.chart_stack.addWidget(self.empty_charts)
+        self.chart_stack.addWidget(self.charts)
 
         # Summary stats table
         self.summary_group = QGroupBox("Benchmark Summary")
@@ -308,11 +318,20 @@ class MainWindow(QMainWindow):
         self.btn_details.toggled.connect(self._toggle_details)
         self.summary_table.setVisible(False)
 
-        summary_layout.addLayout(cards_row)
-        summary_layout.addWidget(self.btn_details)
-        summary_layout.addWidget(self.summary_table)
+        results_page = QWidget()
+        results_layout = QVBoxLayout(results_page)
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.addLayout(cards_row)
+        results_layout.addWidget(self.btn_details)
+        results_layout.addWidget(self.summary_table)
+        self.empty_summary = EmptyState("No results yet",
+                                        "Results appear here when a run finishes.")
+        self.summary_stack = QStackedWidget()
+        self.summary_stack.addWidget(self.empty_summary)
+        self.summary_stack.addWidget(results_page)
+        self._results_page = results_page
+        summary_layout.addWidget(self.summary_stack)
         self.summary_group.setLayout(summary_layout)
-        self.summary_group.setVisible(False)
 
         # Progress on top; below it charts, summary and log share the height
         # through a splitter, the log last — it is the least read of the three
@@ -325,7 +344,7 @@ class MainWindow(QMainWindow):
 
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
         self.right_splitter.setObjectName("rightSplitter")
-        self.right_splitter.addWidget(self.charts)
+        self.right_splitter.addWidget(self.chart_stack)
         self.right_splitter.addWidget(self.summary_group)
         self.right_splitter.addWidget(self.log_panel)
         self.right_splitter.setCollapsible(0, False)
@@ -352,7 +371,7 @@ class MainWindow(QMainWindow):
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         left_scroll.setWidget(left_widget)
-        left_scroll.setMinimumWidth(400)
+        left_scroll.setMinimumWidth(360)
 
         right_widget = QWidget()
         right_widget.setLayout(right_panel)
@@ -521,6 +540,10 @@ class MainWindow(QMainWindow):
         self._last_telemetry_error = message
         if message.startswith("NVML Initialization Failed"):
             self.header.set_gpu_unavailable(message)
+            self.empty_charts.set_text(
+                "No NVIDIA GPU detected",
+                "Runs need an NVIDIA card and driver. The presets, the VRAM estimate "
+                "and File → Compare runs (Ctrl+Shift+O) work without one.")
         self.log_to_console(f"TELEMETRY ERROR: {message}")
 
     @pyqtSlot(dict)
@@ -767,7 +790,8 @@ class MainWindow(QMainWindow):
         self.act_export.setEnabled(False)
         self.phase_bar.start(self.spin_warmup.value(), self.spin_steps.value())
         self.header.set_status(header.LOADING)
-        self.summary_group.setVisible(False)
+        self.empty_summary.set_text("Running…", "Results appear here when the run finishes.")
+        self.summary_stack.setCurrentWidget(self.empty_summary)
         self._loss_steps, self._loss_values = [], []
         self._rate = RateTracker()
         self._run_warmup = self.spin_warmup.value()
@@ -776,7 +800,7 @@ class MainWindow(QMainWindow):
         # heavier presets is far too long to watch a bare progress bar.
         self.charts.reset()
         self.charts.set_warmup(self._run_warmup)
-        self.charts.setVisible(True)
+        self.chart_stack.setCurrentWidget(self.charts)
         self._live_timer.start()
         self.log_to_console("\n--- Starting Synthetic Workload ---")
         if self.lbl_fit.property("warning"):
@@ -877,6 +901,7 @@ class MainWindow(QMainWindow):
         df = self.logger.stop()
         self.phase_bar.reset()
         self.header.set_status(header.FAILED)
+        self.empty_summary.set_text("The run failed", "No results — the log says why.")
         self._set_idle_controls()
         self.act_export.setEnabled(df is not None)
 
@@ -889,7 +914,7 @@ class MainWindow(QMainWindow):
     def _render_plots(self, df, summary: dict):
         """Final draw from the complete run, exactly as it will be exported."""
         self.charts.show_run(df, self.logger.power_trace())
-        self.charts.setVisible(True)
+        self.chart_stack.setCurrentWidget(self.charts)
         self.charts.setCurrentIndex(0)
 
         # --- Summary Stats Table ---
@@ -921,7 +946,7 @@ class MainWindow(QMainWindow):
             self.summary_table.setItem(row, 0, item_m)
             self.summary_table.setItem(row, 1, item_v)
 
-        self.summary_group.setVisible(True)
+        self.summary_stack.setCurrentWidget(self._results_page)
 
     def export_results(self):
         """Exports the last benchmark's telemetry to CSV and renders plot PNG."""

@@ -57,6 +57,7 @@ The GUI window opens with:
 - Light and dark themes covering the widgets, the stylesheet and the charts. **View → Theme** follows the operating system by default — and switches live when the OS does — or pins Light or Dark; **Ctrl+Shift+D** flips between the two. A y-axis coloured to match its curve keeps that colour in both themes, and the exported PNG always stays light for printing
 - **Help → About** listing what the build is made of — Python, Qt and PyQt, the torch / transformers / peft / bitsandbytes / nvidia-ml-py versions, the native module's version and compiler, how power is being sampled, and the GPU and driver — with a **Copy** button that puts it all on the clipboard for a bug report. The app has its own icon (`app/ui/assets/icon.svg`)
 - **File → Compare runs…** (**Ctrl+Shift+O**): pick several exported `report_*.json` files to see their results side by side — the best value of each row where a direction makes sense (tokens/s, efficiency higher; temperature and time throttled lower) — with their power and temperature curves overlaid from the CSVs the reports name. A report that cannot be read is listed and skipped, not fatal
+- Before the first run, the chart and summary areas say what will appear there and how to get it, instead of leaving an empty gap; without an NVIDIA driver, the chart area says so and lists what still works without one (presets, the VRAM estimate, run comparison)
 - A resizable layout: telemetry and workload on the left (scrolling when the window is short), charts, summary and execution log on the right, split by draggable dividers. The log can be dragged shut or hidden from **View → Execution log**, and window size, panel splits and the log's visibility are restored on the next launch
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
@@ -146,7 +147,7 @@ app/
     about.py                   — Help → About: component versions, copyable for bug reports
     compare_window.py          — File → Compare runs: reports side by side, curves overlaid
     assets/icon.svg            — the app icon
-    widgets/                   — dashboard widgets (header, status chips, arc gauges, metric tiles, sparklines, result cards, phase progress bar), themed from the palette
+    widgets/                   — dashboard widgets (header, status chips, arc gauges, metric tiles, sparklines, result cards, phase progress bar, empty states), themed from the palette
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window
