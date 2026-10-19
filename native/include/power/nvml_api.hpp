@@ -3,8 +3,9 @@
 // The sampler does not link against libnvidia-ml or include nvml.h. Both come
 // with the NVIDIA driver and CUDA Toolkit, so linking would make the module
 // unbuildable on a Mac or a CI runner and unimportable on any machine without
-// an NVIDIA driver. Instead the library is opened with dlopen — exactly what
-// pynvml does through ctypes — and the handful of entry points the sampler
+// an NVIDIA driver. Instead the library is opened at run time (dlopen, or
+// LoadLibraryW on Windows; see dynlib.hpp) — exactly what pynvml does
+// through ctypes — and the handful of entry points the sampler
 // needs are resolved by name. Their declarations are copied below; NVML keeps
 // them ABI-stable, which is why the versioned names (_v2) exist at all.
 //
@@ -19,6 +20,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "power/dynlib.hpp"
 
 namespace power::nvml {
 
@@ -86,7 +89,8 @@ class Library {
     // loads. Never throws: on failure the result carries the reason.
     static OpenResult open(const std::vector<std::string>& candidates);
 
-    // Where the driver puts the library on this platform; empty where NVML
+    // Where the driver puts the library on this platform: libnvidia-ml.so.1
+    // on Linux, nvml.dll in System32 or NVSMI on Windows; empty where NVML
     // does not exist (macOS).
     static std::vector<std::string> default_paths();
 
@@ -102,7 +106,7 @@ class Library {
     std::string error_string(Return result) const;
 
   private:
-    Library(void* handle, std::string path) : handle_(handle), path_(std::move(path)) {}
+    Library(DynamicLibrary lib, std::string path) : lib_(std::move(lib)), path_(std::move(path)) {}
     std::string resolve_all();
 
     using InitFn = Return (*)();
@@ -112,7 +116,7 @@ class Library {
     using PowerUsageFn = Return (*)(Device, unsigned int*);
     using ErrorStringFn = const char* (*)(Return);
 
-    void* handle_;
+    DynamicLibrary lib_;
     std::string path_;
     bool initialised_ = false;
     InitFn init_ = nullptr;

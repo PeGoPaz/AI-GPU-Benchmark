@@ -1,36 +1,38 @@
 #include "power/nvml_api.hpp"
 
-#include <cstring>
+#include <cstdlib>
+#include <optional>
 #include <utility>
-
-#if !defined(_WIN32)
-#include <dlfcn.h>
-#endif
 
 namespace power::nvml {
 
+#if defined(_WIN32)
 namespace {
 
-#if !defined(_WIN32)
-// dlsym hands back an object pointer; converting it to a function pointer is
-// only conditionally supported by the standard, and some compilers warn on
-// the cast under -Wpedantic. Copying the bits is well defined everywhere.
-template <typename Fn>
-bool resolve(void* handle, const char* name, Fn& out) {
-    void* symbol = dlsym(handle, name);
-    if (symbol == nullptr) {
-        return false;
+// An environment variable, if set. MSVC flags getenv as unsafe (C4996),
+// which /W4 /WX turns into an error, so this goes through _dupenv_s.
+std::optional<std::string> env(const char* name) {
+    char* value = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr) {
+        return std::nullopt;
     }
-    static_assert(sizeof(Fn) == sizeof(symbol));
-    std::memcpy(&out, &symbol, sizeof(out));
-    return true;
+    std::string result(value);
+    std::free(value);
+    return result;
 }
-#endif
 
 }  // namespace
+#endif
 
 std::vector<std::string> Library::default_paths() {
-#if defined(__linux__)
+#if defined(_WIN32)
+    // The same two places pynvml looks, in the same order: System32 for DCH
+    // drivers (every current one), the NVSMI folder for older installs.
+    return {env("WINDIR").value_or("C:\\Windows") + "\\System32\\nvml.dll",
+            env("ProgramFiles").value_or("C:\\Program Files") +
+                "\\NVIDIA Corporation\\NVSMI\\nvml.dll"};
+#elif defined(__linux__)
     // The versioned soname: the unversioned symlink is only installed with
     // the CUDA development packages, the .1 file with every driver.
     return {"libnvidia-ml.so.1"};
@@ -40,24 +42,20 @@ std::vector<std::string> Library::default_paths() {
 }
 
 Library::OpenResult Library::open(const std::vector<std::string>& candidates) {
-#if defined(_WIN32)
-    (void)candidates;
-    return {nullptr, "the native sampler does not support Windows yet"};
-#else
     if (candidates.empty()) {
         return {nullptr, "NVML does not exist on this platform"};
     }
 
     std::string errors;
     for (const std::string& path : candidates) {
-        void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-        if (handle == nullptr) {
-            const char* reason = dlerror();
-            errors += (errors.empty() ? "" : "; ") + std::string(reason ? reason : path);
+        std::string error;
+        DynamicLibrary handle = DynamicLibrary::open(path, error);
+        if (!handle.is_open()) {
+            errors += (errors.empty() ? "" : "; ") + error;
             continue;
         }
 
-        std::unique_ptr<Library> library(new Library(handle, path));
+        std::unique_ptr<Library> library(new Library(std::move(handle), path));
         if (std::string missing = library->resolve_all(); !missing.empty()) {
             return {nullptr, path + " is missing " + missing};
         }
@@ -68,38 +66,28 @@ Library::OpenResult Library::open(const std::vector<std::string>& candidates) {
         return {std::move(library), ""};
     }
     return {nullptr, "could not load NVML: " + errors};
-#endif
 }
 
 std::string Library::resolve_all() {
-#if defined(_WIN32)
-    return "everything";
-#else
     // Versioned names, as pynvml uses: the unversioned nvmlInit and
     // nvmlDeviceGetHandleByIndex are the pre-2012 ABI, kept only for old
     // binaries.
-    if (!resolve(handle_, "nvmlInit_v2", init_)) return "nvmlInit_v2";
-    if (!resolve(handle_, "nvmlShutdown", shutdown_)) return "nvmlShutdown";
-    if (!resolve(handle_, "nvmlDeviceGetHandleByIndex_v2", device_by_index_))
+    if (!lib_.resolve("nvmlInit_v2", init_)) return "nvmlInit_v2";
+    if (!lib_.resolve("nvmlShutdown", shutdown_)) return "nvmlShutdown";
+    if (!lib_.resolve("nvmlDeviceGetHandleByIndex_v2", device_by_index_))
         return "nvmlDeviceGetHandleByIndex_v2";
-    if (!resolve(handle_, "nvmlDeviceGetFieldValues", field_values_))
-        return "nvmlDeviceGetFieldValues";
-    if (!resolve(handle_, "nvmlDeviceGetPowerUsage", power_usage_))
-        return "nvmlDeviceGetPowerUsage";
-    if (!resolve(handle_, "nvmlErrorString", error_string_)) return "nvmlErrorString";
+    if (!lib_.resolve("nvmlDeviceGetFieldValues", field_values_)) return "nvmlDeviceGetFieldValues";
+    if (!lib_.resolve("nvmlDeviceGetPowerUsage", power_usage_)) return "nvmlDeviceGetPowerUsage";
+    if (!lib_.resolve("nvmlErrorString", error_string_)) return "nvmlErrorString";
     return "";
-#endif
 }
 
 Library::~Library() {
     // NVML counts initialisations, so this only drops our reference: pynvml,
-    // running in the same process, keeps its own.
+    // running in the same process, keeps its own. lib_ closes itself after.
     if (initialised_) {
         shutdown_();
     }
-#if !defined(_WIN32)
-    dlclose(handle_);
-#endif
 }
 
 Return Library::device_by_index(unsigned int index, Device* device) const {

@@ -85,10 +85,17 @@ TEST(NvmlLibrary, ErrorStringsComeFromNvml) {
     EXPECT_EQ(result.library->error_string(power::nvml::kErrorNotSupported), "Not Supported");
 }
 
-TEST(NvmlLibrary, LinuxLooksForTheVersionedSoname) {
-#if defined(__linux__)
-    EXPECT_EQ(Library::default_paths(), std::vector<std::string>{"libnvidia-ml.so.1"});
+TEST(NvmlLibrary, LooksWhereThisPlatformsDriverPutsIt) {
+    const auto paths = Library::default_paths();
+#if defined(_WIN32)
+    // System32 for DCH drivers first, then the older NVSMI folder.
+    ASSERT_EQ(paths.size(), 2u);
+    EXPECT_NE(paths[0].find("\\System32\\nvml.dll"), std::string::npos) << paths[0];
+    EXPECT_NE(paths[1].find("\\NVIDIA Corporation\\NVSMI\\nvml.dll"), std::string::npos)
+        << paths[1];
+#elif defined(__linux__)
+    EXPECT_EQ(paths, std::vector<std::string>{"libnvidia-ml.so.1"});
 #else
-    EXPECT_TRUE(Library::default_paths().empty());
+    EXPECT_TRUE(paths.empty());
 #endif
 }

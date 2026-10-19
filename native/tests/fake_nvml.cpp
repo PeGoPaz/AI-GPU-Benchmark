@@ -12,6 +12,15 @@
 #include <chrono>
 #include <cstdint>
 
+// Exported by name, as the real library's entry points are: on Windows a DLL
+// exports nothing unless told to, and the tests resolve these with
+// GetProcAddress exactly as the loader resolves NVML's.
+#if defined(_WIN32)
+#define FAKE_NVML_EXPORT __declspec(dllexport)
+#else
+#define FAKE_NVML_EXPORT __attribute__((visibility("default")))
+#endif
+
 using power::nvml::FieldValue;
 using power::nvml::Return;
 using power::nvml::ValueType;
@@ -48,17 +57,18 @@ extern "C" {
 
 // --- the NVML surface ----------------------------------------------------------
 
-Return nvmlInit_v2() {
+FAKE_NVML_EXPORT Return nvmlInit_v2() {
     ++g_init_calls;
     return g_init_result.load();
 }
 
-Return nvmlShutdown() {
+FAKE_NVML_EXPORT Return nvmlShutdown() {
     ++g_shutdown_calls;
     return 0;
 }
 
-Return nvmlDeviceGetHandleByIndex_v2(unsigned int index, power::nvml::Device* device) {
+FAKE_NVML_EXPORT Return nvmlDeviceGetHandleByIndex_v2(unsigned int index,
+                                                      power::nvml::Device* device) {
     if (index != 0) {
         return power::nvml::kErrorInvalidArgument;
     }
@@ -67,7 +77,8 @@ Return nvmlDeviceGetHandleByIndex_v2(unsigned int index, power::nvml::Device* de
 }
 
 #if !defined(FAKE_NVML_INCOMPLETE)
-Return nvmlDeviceGetFieldValues(power::nvml::Device, int count, FieldValue* values) {
+FAKE_NVML_EXPORT Return nvmlDeviceGetFieldValues(power::nvml::Device, int count,
+                                                 FieldValue* values) {
     for (int i = 0; i < count; ++i) {
         FieldValue& v = values[i];
         if (v.fieldId != power::nvml::kFieldPowerInstant || !g_instant_supported.load()) {
@@ -83,7 +94,7 @@ Return nvmlDeviceGetFieldValues(power::nvml::Device, int count, FieldValue* valu
 }
 #endif
 
-Return nvmlDeviceGetPowerUsage(power::nvml::Device, unsigned int* milliwatts) {
+FAKE_NVML_EXPORT Return nvmlDeviceGetPowerUsage(power::nvml::Device, unsigned int* milliwatts) {
     if (Return r = g_read_result.load(); r != 0) {
         return r;
     }
@@ -91,7 +102,7 @@ Return nvmlDeviceGetPowerUsage(power::nvml::Device, unsigned int* milliwatts) {
     return 0;
 }
 
-const char* nvmlErrorString(Return result) {
+FAKE_NVML_EXPORT const char* nvmlErrorString(Return result) {
     switch (result) {
         case 0:
             return "Success";
@@ -106,7 +117,7 @@ const char* nvmlErrorString(Return result) {
 
 // --- test controls -------------------------------------------------------------
 
-void fake_nvml_reset() {
+FAKE_NVML_EXPORT void fake_nvml_reset() {
     g_init_result = 0;
     g_init_calls = 0;
     g_shutdown_calls = 0;
@@ -117,18 +128,20 @@ void fake_nvml_reset() {
     g_reads = 0;
 }
 
-void fake_nvml_set_init_result(Return result) { g_init_result = result; }
-void fake_nvml_set_instant_supported(int supported) { g_instant_supported = supported != 0; }
-void fake_nvml_set_read_result(Return result) { g_read_result = result; }
+FAKE_NVML_EXPORT void fake_nvml_set_init_result(Return result) { g_init_result = result; }
+FAKE_NVML_EXPORT void fake_nvml_set_instant_supported(int supported) {
+    g_instant_supported = supported != 0;
+}
+FAKE_NVML_EXPORT void fake_nvml_set_read_result(Return result) { g_read_result = result; }
 
 // Each read returns base + step × (reads so far): a step of 0 is a flat line.
-void fake_nvml_set_power(unsigned int base_mw, unsigned int step_mw) {
+FAKE_NVML_EXPORT void fake_nvml_set_power(unsigned int base_mw, unsigned int step_mw) {
     g_power_base_mw = base_mw;
     g_power_step_mw = step_mw;
 }
 
-int fake_nvml_init_calls() { return g_init_calls.load(); }
-int fake_nvml_shutdown_calls() { return g_shutdown_calls.load(); }
-unsigned int fake_nvml_reads() { return g_reads.load(); }
+FAKE_NVML_EXPORT int fake_nvml_init_calls() { return g_init_calls.load(); }
+FAKE_NVML_EXPORT int fake_nvml_shutdown_calls() { return g_shutdown_calls.load(); }
+FAKE_NVML_EXPORT unsigned int fake_nvml_reads() { return g_reads.load(); }
 
 }  // extern "C"

@@ -42,7 +42,7 @@ target_compile_options(power_warnings INTERFACE
 # link it, which is what keeps it testable without an interpreter.
 find_package(Threads REQUIRED)
 
-add_library(power_core STATIC src/nvml_api.cpp src/sampler.cpp)
+add_library(power_core STATIC src/dynlib.cpp src/nvml_api.cpp src/sampler.cpp)
 target_include_directories(power_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(power_core PUBLIC cxx_std_17)
 # dlopen lives in libdl on glibc older than 2.34; empty where it is in libc.
@@ -86,6 +86,7 @@ if(BUILD_TESTING)
     target_compile_definitions(fake_nvml_incomplete PRIVATE FAKE_NVML_INCOMPLETE)
 
     add_executable(power_tests
+        tests/test_dynlib.cpp
         tests/test_ring_buffer.cpp
         tests/test_nvml_api.cpp
         tests/test_sampler.cpp)
