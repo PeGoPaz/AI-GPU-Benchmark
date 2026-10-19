@@ -97,8 +97,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux is where the GPU runs; macOS is where development happens.
-        os: [ubuntu-latest, macos-latest]
+        # Linux is where the GPU runs, macOS where development happens, and
+        # Windows where most consumer NVIDIA cards are.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Ninja needs the MSVC environment on Windows; the default Visual
+          # Studio generator finds the compiler by itself.
+          - generator: "-G Ninja"
+          - os: windows-latest
+            generator: ""
 
     steps:
       - uses: actions/checkout@v7
@@ -115,14 +122,16 @@ jobs:
 
       - name: Configure
         run: >
-          cmake -S native -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake -S native -B build ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Debug
           -DPOWER_BUILD_PYTHON=OFF -DPOWER_WARNINGS_AS_ERRORS=ON
 
+      # --config / -C are what a multi-config generator (Visual Studio) needs,
+      # and are ignored by the single-config ones.
       - name: Build
-        run: cmake --build build
+        run: cmake --build build --config Debug
 
       - name: C++ tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -C Debug --output-on-failure
 
       # Warnings as errors here too: the bindings are only compiled by
       # this build, never by the C++-only one above.

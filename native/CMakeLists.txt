@@ -27,16 +27,36 @@ set(POWER_SANITIZE "" CACHE STRING
 # Applied to every target, GoogleTest included: ThreadSanitizer in particular
 # reports false races when only part of the program is instrumented.
 if(POWER_SANITIZE)
-    add_compile_options(-fsanitize=${POWER_SANITIZE} -fno-omit-frame-pointer
-                        -fno-sanitize-recover=all)
-    add_link_options(-fsanitize=${POWER_SANITIZE})
+    if(MSVC)
+        # MSVC has AddressSanitizer and nothing else.
+        if(NOT POWER_SANITIZE STREQUAL "address")
+            message(FATAL_ERROR "MSVC supports POWER_SANITIZE=address only")
+        endif()
+        add_compile_options(/fsanitize=address)
+    else()
+        add_compile_options(-fsanitize=${POWER_SANITIZE} -fno-omit-frame-pointer
+                            -fno-sanitize-recover=all)
+        add_link_options(-fsanitize=${POWER_SANITIZE})
+    endif()
 endif()
 
 # Warnings for our own targets only — third-party headers come in as SYSTEM.
 add_library(power_warnings INTERFACE)
-target_compile_options(power_warnings INTERFACE
-    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
-    $<$<BOOL:${POWER_WARNINGS_AS_ERRORS}>:-Werror>)
+if(MSVC)
+    # Without this MSVC reports __cplusplus as 199711 whatever the standard,
+    # and build_info() would claim C++98.
+    add_compile_options(/Zc:__cplusplus)
+    # /permissive- for standard conformance, /utf-8 because the sources are.
+    target_compile_options(power_warnings INTERFACE
+        /W4 /permissive- /utf-8 $<$<BOOL:${POWER_WARNINGS_AS_ERRORS}>:/WX>)
+    # GoogleTest otherwise links the static CRT while everything else links
+    # the DLL one, and the test executable fails to link.
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+else()
+    target_compile_options(power_warnings INTERFACE
+        -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
+        $<$<BOOL:${POWER_WARNINGS_AS_ERRORS}>:-Werror>)
+endif()
 
 # The sampler itself: plain C++, no Python. Both the module and the tests
 # link it, which is what keeps it testable without an interpreter.
@@ -47,6 +67,10 @@ target_include_directories(power_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 target_compile_features(power_core PUBLIC cxx_std_17)
 # dlopen lives in libdl on glibc older than 2.34; empty where it is in libc.
 target_link_libraries(power_core PUBLIC ${CMAKE_DL_LIBS} Threads::Threads PRIVATE power_warnings)
+if(WIN32)
+    # timeBeginPeriod, for the sampler's 1 ms timer resolution.
+    target_link_libraries(power_core PUBLIC winmm)
+endif()
 
 if(POWER_BUILD_PYTHON)
     find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)

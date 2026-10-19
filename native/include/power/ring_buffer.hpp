@@ -21,6 +21,13 @@
 
 namespace power {
 
+// MSVC warns (C4324) that the alignas below pads the class. The padding is
+// the point: it keeps the two counters on separate cache lines.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 template <typename T>
 class SpscRing {
     static_assert(std::is_trivially_copyable_v<T>,
@@ -100,5 +107,9 @@ class SpscRing {
     alignas(kCacheLine) std::atomic<std::size_t> head_{0};
     alignas(kCacheLine) std::atomic<std::size_t> tail_{0};
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 }  // namespace power

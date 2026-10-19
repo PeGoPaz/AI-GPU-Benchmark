@@ -4,6 +4,20 @@
 #include <stdexcept>
 #include <utility>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+// Needs windows.h first. The blank line and this comment make it a separate
+// include block, so the include sorter cannot move it above.
+#include <timeapi.h>
+#endif
+
 namespace power {
 
 namespace {
@@ -38,6 +52,20 @@ std::optional<std::uint32_t> milliwatts_from(const nvml::FieldValue& field) {
     }
     return static_cast<std::uint32_t>(value);
 }
+
+#if defined(_WIN32)
+// Windows rounds every timed wait up to the system timer tick, 15.6 ms by
+// default: a 2 ms cadence would come out at 64 Hz. Raising the resolution
+// to 1 ms for as long as the sampler runs is the standard remedy (Python
+// 3.11 does the equivalent inside time.sleep).
+class TimerResolution {
+  public:
+    TimerResolution() { timeBeginPeriod(1); }
+    ~TimerResolution() { timeEndPeriod(1); }
+    TimerResolution(const TimerResolution&) = delete;
+    TimerResolution& operator=(const TimerResolution&) = delete;
+};
+#endif
 
 std::int64_t unix_now_ns() {
     using namespace std::chrono;
@@ -173,6 +201,9 @@ SamplerStats Sampler::stats() const noexcept {
 
 void Sampler::loop() {
     using clock = std::chrono::steady_clock;
+#if defined(_WIN32)
+    const TimerResolution resolution;
+#endif
 
     auto next = clock::now();
     std::optional<clock::time_point> previous_read;
