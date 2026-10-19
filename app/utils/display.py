@@ -5,6 +5,7 @@ be on course for two copies of the formatting, the way the charts once were.
 """
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from app.core.metrics import compute_stats
 
@@ -118,3 +119,48 @@ def summary_rows(df, summary: dict, trace=None) -> list[tuple[str, str]]:
                         f"Gen{stats['pcie_gen_peak']:.0f} x{stats['pcie_width_peak']:.0f}"))
 
     return metrics
+
+
+@dataclass(frozen=True)
+class Headline:
+    """One of the few numbers worth reading first, as a card shows it."""
+    label: str
+    value: str
+    unit: str = ""
+    caption: str = ""
+
+
+def headline_cards(df, summary: dict, trace=None) -> list[Headline]:
+    """The run in five numbers: rate, compute, efficiency, peak power, peak heat.
+
+    The full table still has everything; these are what people compare runs
+    by. A figure the run cannot support — no timed window, no energy reading —
+    falls back to the nearest one it can, rather than showing a dash.
+    """
+    stats = compute_stats(df, summary, trace)
+    cards = []
+
+    if stats['tokens_per_sec'] is not None:
+        cards.append(Headline("Throughput", f"{stats['tokens_per_sec']:,.0f}", "tokens/s",
+                              f"{summary['steps_per_sec']:.2f} steps/s"))
+    else:
+        cards.append(Headline("Throughput", f"{summary['steps_per_sec']:.2f}", "steps/s",
+                              "no token count for this run"))
+
+    if stats['est_tflops'] is not None:
+        cards.append(Headline("Compute", f"{stats['est_tflops']:.1f}", "TFLOPS", "estimated"))
+
+    if stats['tokens_per_joule'] is not None:
+        cards.append(Headline("Efficiency", f"{stats['tokens_per_joule']:.0f}", "tokens/J",
+                              f"{stats['energy_j'] / 1000:.1f} kJ over the timed window"))
+
+    if stats['native_peak_power_w'] is not None:
+        cards.append(Headline("Peak Power", f"{stats['native_peak_power_w']:.0f}", "W",
+                              f"instant · {stats['peak_power_w']:.0f} W in 250 ms polls"))
+    else:
+        cards.append(Headline("Peak Power", f"{stats['peak_power_w']:.0f}", "W",
+                              f"250 ms polls · avg {stats['avg_power_w']:.0f} W"))
+
+    cards.append(Headline("Max Temp", f"{stats['max_temp_c']:.0f}", "°C",
+                          f"avg {stats['avg_temp_c']:.0f} °C"))
+    return cards

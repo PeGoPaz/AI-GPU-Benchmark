@@ -186,6 +186,24 @@ QLabel#tileUnit, QLabel#tileCaption {{
     font-size: 11px;
 }}
 
+QFrame#resultCard {{
+    background-color: {theme.surface};
+    border: 1px solid {theme.border};
+    border-radius: 8px;
+}}
+
+QLabel#resultValue {{
+    color: {theme.accent};
+    font-size: 26px;
+    font-weight: bold;
+}}
+
+QToolButton#detailsToggle {{
+    border: none;
+    color: {theme.muted};
+    font-weight: bold;
+}}
+
 QFrame#header {{
     background-color: {theme.surface};
     border-bottom: 1px solid {theme.border};

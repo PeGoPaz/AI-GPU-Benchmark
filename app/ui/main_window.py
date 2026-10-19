@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -39,8 +40,9 @@ from app.ui.widgets import header
 from app.ui.widgets.gauge import ArcGauge
 from app.ui.widgets.header import HeaderBar
 from app.ui.widgets.phase_progress import PhaseProgressBar
+from app.ui.widgets.result_card import ResultCard
 from app.ui.widgets.tile import MetricTile
-from app.utils.display import RateTracker, format_progress, summary_rows
+from app.utils.display import RateTracker, format_progress, headline_cards, summary_rows
 from app.utils.logger import BenchmarkLogger
 from app.utils.report import build_report
 
@@ -240,7 +242,25 @@ class MainWindow(QMainWindow):
         self.summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.summary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.summary_table.setMaximumHeight(200)
+        self.summary_table.setMaximumHeight(260)
+
+        # The headline numbers first; every row of the table on request.
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(8)
+        self.result_cards = [ResultCard() for _ in range(5)]
+        for card in self.result_cards:
+            cards_row.addWidget(card)
+        self.btn_details = QToolButton()
+        self.btn_details.setObjectName("detailsToggle")
+        self.btn_details.setText("Details")
+        self.btn_details.setCheckable(True)
+        self.btn_details.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_details.setArrowType(Qt.ArrowType.RightArrow)
+        self.btn_details.toggled.connect(self._toggle_details)
+        self.summary_table.setVisible(False)
+
+        summary_layout.addLayout(cards_row)
+        summary_layout.addWidget(self.btn_details)
         summary_layout.addWidget(self.summary_table)
         self.summary_group.setLayout(summary_layout)
         self.summary_group.setVisible(False)
@@ -671,9 +691,21 @@ class MainWindow(QMainWindow):
         self._render_summary(df, summary)
         self.log_to_console("Summary and plots rendered.")
 
+    def _toggle_details(self, shown: bool):
+        self.summary_table.setVisible(shown)
+        self.btn_details.setArrowType(Qt.ArrowType.DownArrow if shown
+                                      else Qt.ArrowType.RightArrow)
+
     def _render_summary(self, df, summary: dict):
-        """Populates the summary table with computed benchmark metrics."""
-        metrics = summary_rows(df, summary, self.logger.power_trace())
+        """Headline cards, and the full table under Details."""
+        trace = self.logger.power_trace()
+        headlines = headline_cards(df, summary, trace)
+        for card, headline in zip(self.result_cards, headlines + [None] * 5, strict=False):
+            card.setVisible(headline is not None)
+            if headline is not None:
+                card.set_headline(headline)
+
+        metrics = summary_rows(df, summary, trace)
 
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):

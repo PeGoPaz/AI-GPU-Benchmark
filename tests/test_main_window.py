@@ -932,3 +932,41 @@ def test_trend_line_turns_with_the_tile_state(window, telemetry_sample):
     window.update_telemetry_ui(telemetry_sample(0, temp_headroom_c=3))
 
     assert window.tiles["headroom"].sparkline._color == LIGHT.crit
+
+
+# --- headline results ------------------------------------------------------------------
+
+def test_finished_run_leads_with_headline_cards(window, telemetry_sample):
+    window.logger.start()
+    for i in range(9):
+        window.logger.log(telemetry_sample(i))
+    window.on_benchmark_finished({
+        "total_steps": 100, "requested_steps": 100, "aborted": False,
+        "elapsed_time_sec": 20.0, "steps_per_sec": 5.0, "tokens_per_step": 4096,
+        "params_b": 1.5, "gradient_checkpointing": False,
+        "measure_start": 102.0, "measure_end": 106.0,
+    })
+
+    shown = [c for c in window.result_cards if not c.isHidden()]
+    assert [c.title_text() for c in shown] == ["THROUGHPUT", "COMPUTE", "EFFICIENCY",
+                                               "PEAK POWER", "MAX TEMP"]
+    assert shown[0].value_text() == "20,480"
+
+
+def test_cards_the_run_cannot_fill_are_hidden(window, telemetry_sample):
+    _finish_run(window, telemetry_sample)        # no token counts in this summary
+
+    shown = [c.title_text() for c in window.result_cards if not c.isHidden()]
+    assert shown == ["THROUGHPUT", "PEAK POWER", "MAX TEMP"]
+
+
+def test_details_table_is_folded_away_until_asked_for(window, telemetry_sample):
+    _finish_run(window, telemetry_sample)
+    assert window.summary_table.isHidden()
+    assert window.summary_table.rowCount() > 0          # filled, just not shown
+
+    window.btn_details.setChecked(True)
+    assert not window.summary_table.isHidden()
+
+    window.btn_details.setChecked(False)
+    assert window.summary_table.isHidden()
