@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -59,6 +59,7 @@ from app.utils.logger import BenchmarkLogger
 from app.utils.report import build_report
 
 SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
+SYSTEM = "system"
 
 # How often the live charts take in new data: as often as telemetry arrives.
 # pyqtgraph swaps curve data without redrawing the figure, so this is cheap.
@@ -356,11 +357,27 @@ class MainWindow(QMainWindow):
         for action in (self.act_start, self.act_stop, self.act_export):
             run_menu.addAction(action)
         view_menu = self.menuBar().addMenu("&View")
-        self.act_dark = QAction("&Dark theme", self)
-        self.act_dark.setCheckable(True)
-        self.act_dark.setShortcut(QKeySequence("Ctrl+Shift+D"))
-        self.act_dark.toggled.connect(self._on_dark_toggled)
-        view_menu.addAction(self.act_dark)
+        # Theme: follow the system by default, or pin light or dark.
+        self.theme_menu = view_menu.addMenu("&Theme")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        self.theme_actions = {}
+        for choice, label in ((SYSTEM, "&System"), ("light", "&Light"), ("dark", "&Dark")):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda _=False, c=choice: self.set_theme_choice(c))
+            theme_group.addAction(action)
+            self.theme_menu.addAction(action)
+            self.theme_actions[choice] = action
+        self.act_toggle_theme = QAction("Switch light/dark", self)
+        self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+Shift+D"))
+        self.act_toggle_theme.triggered.connect(self._toggle_theme)
+        self.theme_menu.addSeparator()
+        self.theme_menu.addAction(self.act_toggle_theme)
+        self._theme_choice = SYSTEM
+        hints = QGuiApplication.styleHints()
+        if hints is not None and hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_system_scheme_changed)
         self.act_log = QAction("Execution &log", self)
         self.act_log.setCheckable(True)
         self.act_log.setChecked(True)
@@ -383,7 +400,13 @@ class MainWindow(QMainWindow):
             self.toolbar.addAction(action)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.act_log)
-        self.toolbar.addAction(self.act_dark)
+        self.theme_button = QToolButton()
+        self.theme_button.setText("Theme")
+        self.theme_button.setToolTip("Theme: follow the system, or pin light or dark")
+        self.theme_button.setMenu(self.theme_menu)
+        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toolbar.addWidget(self.theme_button)
         self.addToolBar(self.toolbar)
 
         # Applied last, so every widget above is polished in one pass.
@@ -540,18 +563,43 @@ class MainWindow(QMainWindow):
                                      (self.act_stop, "stop", STOP_RED),
                                      (self.act_export, "export", text),
                                      (self.act_log, "log", text),
-                                     (self.act_dark, "theme", text)):
+                                     (self.act_toggle_theme, "theme", text)):
             action.setIcon(icons.icon(glyph, color))
+        self.theme_button.setIcon(icons.icon("theme", text))
 
-    @pyqtSlot(bool)
-    def _on_dark_toggled(self, dark: bool):
-        self._apply_theme(THEMES["dark" if dark else "light"])
-        self.settings.setValue("ui/theme", self._theme.name)
+    @staticmethod
+    def system_is_dark() -> bool:
+        """The OS colour scheme, where Qt can tell (6.5+); light otherwise."""
+        hints = QGuiApplication.styleHints()
+        if hints is None or not hasattr(hints, "colorScheme"):
+            return False
+        return hints.colorScheme() == Qt.ColorScheme.Dark
+
+    def theme_choice(self) -> str:
+        return self._theme_choice
+
+    def set_theme_choice(self, choice: str):
+        """System, light or dark; System re-resolves when the OS changes."""
+        if choice not in self.theme_actions:
+            choice = SYSTEM
+        self._theme_choice = choice
+        self.theme_actions[choice].setChecked(True)
+        name = ("dark" if self.system_is_dark() else "light") if choice == SYSTEM else choice
+        self._apply_theme(THEMES[name])
+        self.settings.setValue("ui/theme", choice)
+
+    def _on_system_scheme_changed(self, *_):
+        if self._theme_choice == SYSTEM:
+            self.set_theme_choice(SYSTEM)
+
+    def _toggle_theme(self):
+        """Ctrl+Shift+D: the other theme, pinned — it overrides System."""
+        self.set_theme_choice("light" if self._theme.name == "dark" else "dark")
 
     def _save_settings(self):
         """Remembers the workload, so the next launch opens on the last run."""
         s = self.settings
-        s.setValue("ui/theme", self._theme.name)
+        s.setValue("ui/theme", self._theme_choice)
         s.setValue("workload/preset", self.cmb_preset.currentText())
         s.setValue("workload/model", self.cmb_model.currentText())
         s.setValue("workload/precision", self.cmb_precision.currentText())
@@ -609,8 +657,8 @@ class MainWindow(QMainWindow):
 
         self.spin_warmup.setValue(
             self._setting_int("workload/warmup_steps", self.spin_warmup.value()))
-        # setChecked fires toggled, which applies the theme.
-        self.act_dark.setChecked(s.value("ui/theme", "light", type=str) == "dark")
+        # "light" and "dark" from before System existed mean what they say.
+        self.set_theme_choice(s.value("ui/theme", SYSTEM, type=str))
         self._restore_layout()
 
     def _restore_layout(self):

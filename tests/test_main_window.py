@@ -637,14 +637,14 @@ def test_dark_theme_recolours_window_and_charts(window, telemetry_sample):
     from app.ui.style import DARK
 
     _finish_run(window, telemetry_sample)
-    window.act_dark.setChecked(True)
+    window.set_theme_choice("dark")
 
     window_color = QApplication.instance().palette().color(QPalette.ColorRole.Window)
     assert window_color.name().upper() == DARK.window
     background = window.charts.telemetry_view.backgroundBrush().color().name().upper()
     assert background == DARK.chart_bg
 
-    window.act_dark.setChecked(False)
+    window.set_theme_choice("light")
     background = window.charts.telemetry_view.backgroundBrush().color().name().upper()
     assert background == "#FFFFFF"
 
@@ -655,7 +655,7 @@ def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
     from app.utils.plots import CLOCK_COLOR
 
     _finish_run(window, telemetry_sample)
-    window.act_dark.setChecked(True)
+    window.set_theme_choice("dark")
 
     charts = window.charts
     assert charts.axis_text_color(charts.util_plot, "right") == CLOCK_COLOR.upper()
@@ -663,13 +663,14 @@ def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
 
 
 def test_theme_is_remembered(window, tmp_path):
-    window.act_dark.setChecked(True)
+    window.set_theme_choice("dark")
 
     reopened = _reopen(window, tmp_path)
 
-    assert reopened.act_dark.isChecked()
+    assert reopened.theme_choice() == "dark"
+    assert reopened.theme_actions["dark"].isChecked()
     assert reopened._theme.name == "dark"
-    reopened.act_dark.setChecked(False)              # leave the app palette light
+    reopened.set_theme_choice("light")               # leave the app palette light
 
 
 def test_workload_is_remembered(window, tmp_path, monkeypatch):
@@ -1040,7 +1041,7 @@ def test_commands_have_shortcuts(window):
     assert window.act_start.shortcut().toString() == "Ctrl+R"
     assert window.act_stop.shortcut().toString() == "Esc"
     assert window.act_export.shortcut().toString() == "Ctrl+E"
-    assert window.act_dark.shortcut().toString() == "Ctrl+Shift+D"
+    assert window.act_toggle_theme.shortcut().toString() == "Ctrl+Shift+D"
 
 
 def test_buttons_mirror_their_actions(started_run):
@@ -1079,17 +1080,18 @@ def test_a_disabled_start_ignores_its_shortcut(started_run):
 def test_toolbar_carries_the_run_commands(window):
     actions = window.toolbar.actions()
 
-    for action in (window.act_start, window.act_stop, window.act_export, window.act_dark):
+    for action in (window.act_start, window.act_stop, window.act_export, window.act_log):
         assert action in actions
         assert not action.icon().isNull()
+    assert window.theme_button.menu() is window.theme_menu
 
 
 def test_icons_follow_the_theme(window):
     from app.ui import icons
 
-    window.act_dark.setChecked(True)
+    window.set_theme_choice("dark")
     dark = window.act_export.icon().pixmap(18, 18).toImage()
-    window.act_dark.setChecked(False)
+    window.set_theme_choice("light")
     light = window.act_export.icon().pixmap(18, 18).toImage()
 
     assert dark != light
@@ -1124,3 +1126,68 @@ def test_about_copies_its_details_for_a_bug_report(window):
     copied = QApplication.clipboard().text()
     assert copied.splitlines()[0].startswith("Python")
     assert "Native module" in copied
+
+
+
+# --- system theme -----------------------------------------------------------------------
+
+def test_theme_follows_the_system_by_default(window):
+    assert window.theme_choice() == "system"
+    assert window.theme_actions["system"].isChecked()
+
+
+def test_system_theme_tracks_the_os(window, monkeypatch):
+    import app.ui.main_window as mw
+
+    monkeypatch.setattr(mw.MainWindow, "system_is_dark", staticmethod(lambda: True))
+    window._on_system_scheme_changed()
+    assert window._theme.name == "dark"
+
+    monkeypatch.setattr(mw.MainWindow, "system_is_dark", staticmethod(lambda: False))
+    window._on_system_scheme_changed()
+    assert window._theme.name == "light"
+
+
+def test_a_pinned_theme_ignores_the_os(window, monkeypatch):
+    import app.ui.main_window as mw
+
+    window.set_theme_choice("light")
+    monkeypatch.setattr(mw.MainWindow, "system_is_dark", staticmethod(lambda: True))
+    window._on_system_scheme_changed()
+
+    assert window._theme.name == "light"
+
+
+def test_toggle_shortcut_pins_the_other_theme(window):
+    window.set_theme_choice("light")
+
+    window.act_toggle_theme.trigger()
+    assert (window.theme_choice(), window._theme.name) == ("dark", "dark")
+
+    window.act_toggle_theme.trigger()
+    assert window.theme_choice() == "light"
+
+
+def test_theme_actions_are_exclusive(window):
+    window.theme_actions["dark"].trigger()
+
+    checked = [c for c, action in window.theme_actions.items() if action.isChecked()]
+    assert checked == ["dark"]
+    window.set_theme_choice("light")
+
+
+def test_unknown_saved_theme_falls_back_to_system(tmp_path, qapp, monkeypatch):
+    import pynvml
+
+    from app.ui.main_window import MainWindow
+    monkeypatch.setattr(pynvml, "nvmlInit",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
+    settings = _scratch_settings(tmp_path)
+    settings.setValue("ui/theme", "solarized")
+    settings.sync()
+
+    win = MainWindow(settings=_scratch_settings(tmp_path))
+    win.telemetry.stop()
+
+    assert win.theme_choice() == "system"
+    win.close()
