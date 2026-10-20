@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from gpu_bench.core import thermal
 from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
 
@@ -202,6 +203,21 @@ def step_energy_stats(energies: np.ndarray, source: str | None) -> dict[str, Any
     }
 
 
+def thermal_stats(df: pd.DataFrame, end: float | None) -> dict[str, Any]:
+    """The fitted heating curve's numbers; all None when there is no curve."""
+    fit = thermal.fit_run(df, end)
+    if fit is None:
+        return dict.fromkeys(('thermal_tau_s', 'thermal_steady_c', 'thermal_r2',
+                              'thermal_progress', 'thermal_saturated'))
+    return {
+        'thermal_tau_s': fit.tau_s,
+        'thermal_steady_c': fit.steady_c,
+        'thermal_r2': fit.r_squared,
+        'thermal_progress': fit.progress,
+        'thermal_saturated': fit.saturated,
+    }
+
+
 def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     """max/min/mean of an optional column, None when it was never reported."""
     if column not in df.columns or not df[column].notna().any():
@@ -258,6 +274,7 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
 
     stats.update(step_time_stats(step_durations(summary)))
     stats.update(step_energy_stats(*step_energy(summary, df, trace)))
+    stats.update(thermal_stats(df, summary.get('measure_end')))
 
     tokens_per_step = summary.get('tokens_per_step')
     elapsed = summary.get('elapsed_time_sec') or 0.0

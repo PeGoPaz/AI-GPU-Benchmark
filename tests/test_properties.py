@@ -12,7 +12,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from gpu_bench.cli import resolve
-from gpu_bench.core import metrics
+from gpu_bench.core import metrics, thermal
 from gpu_bench.core.trainer import MODELS, PRECISIONS, PRESETS, pack_tokens
 from gpu_bench.ui.widgets.gauge import nice_ceiling
 from gpu_bench.utils.plots import envelope
@@ -173,3 +173,21 @@ def test_every_entry_resolves_however_its_label_is_typed(registry, data):
     spec = data.draw(st.sampled_from(registry))
 
     assert resolve(registry, _mangle(spec.label, data), "entry") is spec
+
+
+# --- thermal model ----------------------------------------------------------
+
+@given(tau=st.floats(5, 200), start=st.floats(25, 60), rise=st.floats(5, 45),
+       periods=st.floats(1, 6))
+def test_the_heating_fit_recovers_any_clean_curve(tau, start, rise, periods):
+    t = np.arange(0, tau * periods, 0.25)
+    assume(len(t) >= thermal.MIN_POINTS)
+    temps = start + rise * (1 - np.exp(-t / tau))
+    assume(np.ptp(temps) >= thermal.MIN_RISE_C)
+
+    fit = thermal.fit_heating(t, temps)
+
+    assert fit is not None
+    assert math.isclose(fit.tau_s, tau, rel_tol=0.02)
+    assert math.isclose(fit.steady_c, start + rise, abs_tol=0.02 * rise + 0.1)
+    assert fit.saturated == (t[-1] >= 3 * fit.tau_s)

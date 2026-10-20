@@ -144,6 +144,16 @@ Steps/sec alone does not compare across runs — a step at batch 1 and 512 token
 
 The timer does not start with the run. Warm-up steps (10 by default) are executed first and excluded from the measurement, because the opening steps carry lazy weight loading and CUDA kernel compilation — real work, but not the steady-state rate the benchmark is trying to report. Stopping during warm-up reports no throughput at all rather than a number derived from the warm-up itself.
 
+### Thermal steady state
+
+Clocks follow temperature, so a run that ends before the card has finished heating flatters what the same card does under sustained load. The summary fits a first-order thermal model to the temperature curve, from the moment the GPU got busy to the end of the timed window:
+
+```
+T(t) = T∞ − (T∞ − T0) · e^(−t/τ)
+```
+
+τ, the thermal time constant, is how long the card takes to get 63 % of the way to T∞, the temperature where the cooler removes heat as fast as the chip makes it; 95 % takes 3τ. The fit needs no optimiser: for a fixed τ the model is linear in T0 and T∞, so every τ on a log-spaced grid gets a closed-form least-squares fit and the best one wins — deterministic, and with no starting guess to get wrong. The summary reports τ with the fit's R², and whether the run reached steady state; if it did not, how far it got and where it was heading, so a short run predicts the temperature a long one would settle at. No fit is reported rather than a bad one: too little rise, a curve that is a straight line or a step rather than a curve, or an R² under 0.9 all leave the rows out.
+
 ### A note on hotspot (junction) temperature
 
 Earlier versions advertised a hotspot reading. NVML does not expose one: `nvmlDeviceGetTemperature` accepts sensor 0 (GPU core) and, since NVML 13, sensor 1 (`NVML_TEMPERATURE_GPU_MAX`) — nothing else — and the old code's attempts to read sensors 2 and 3 raised `NVML_ERROR_INVALID_ARGUMENT` on every poll and always yielded `N/A`. Tools that do display junction temperature read it through NvAPI or raw BAR0 MMIO, neither of which is available here.
@@ -186,7 +196,8 @@ gpu_bench/
     widgets/                   — dashboard widgets (header, status chips, arc gauges, metric tiles, sparklines, result cards, phase progress bar, empty states), themed from the palette
   core/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
-    metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window
+    metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window, per-step time and energy
+    thermal.py                 — the first-order heating fit: τ, the steady temperature, whether the run got there
     power_sampler.py           — opens the native sampler when it is built, explains why not when it is not
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion; imports the ML stack only when a run starts
   utils/

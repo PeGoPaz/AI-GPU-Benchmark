@@ -44,6 +44,24 @@ def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
     return text
 
 
+# Below this share of the way to T∞, the curve has bent too little for its
+# end point to be extrapolated with any confidence.
+_PREDICTABLE_PROGRESS = 0.5
+
+
+def thermal_verdict(stats: dict[str, Any]) -> str:
+    """Whether the run reached thermal steady state, and if not, how far it got."""
+    steady = f"{stats['thermal_steady_c']:.0f} °C"
+    if stats['thermal_saturated']:
+        return f"reached, at {steady}"
+    progress = stats['thermal_progress']
+    if progress < _PREDICTABLE_PROGRESS:
+        return (f"not reached — still heating steeply at the end; run longer than "
+                f"{3 * stats['thermal_tau_s']:.0f} s for sustained numbers")
+    return (f"not reached — {progress:.0%} of the way, heading for {steady}; "
+            f"sustained numbers may be lower")
+
+
 def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
                  trace: pd.DataFrame | None = None) -> list[tuple[str, str]]:
     """The summary table as (metric, value) pairs, ready to display."""
@@ -94,6 +112,12 @@ def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
     metrics += [
         ("Avg Temp (°C)", f"{stats['avg_temp_c']:.1f}"),
         ("Max Temp (°C)", f"{stats['max_temp_c']:.0f}"),
+    ]
+    if stats['thermal_tau_s'] is not None:
+        metrics.append(("Thermal Time Constant τ (s)",
+                        f"{stats['thermal_tau_s']:.0f} (fit R² {stats['thermal_r2']:.2f})"))
+        metrics.append(("Thermal Steady State", thermal_verdict(stats)))
+    metrics += [
         ("Avg Power (W)", f"{stats['avg_power_w']:.1f}"),
         ("Peak Power (W)", f"{stats['peak_power_w']:.1f}"),
     ]
