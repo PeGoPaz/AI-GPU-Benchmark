@@ -93,6 +93,17 @@ The GUI window opens with:
 - A resizable layout: telemetry and workload on the left (scrolling when the window is short), charts, summary and execution log on the right, split by draggable dividers. The log can be dragged shut or hidden from **View → Execution log**, and window size, panel splits and the log's visibility are restored on the next launch
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
+### Live metrics for Prometheus
+
+A long sweep on a rented GPU is watched from somewhere else. `--metrics-port` serves the live telemetry and training progress in Prometheus' text format while the runs last:
+
+```bash
+gpu-bench --headless --preset stress --metrics-port 9400
+curl -s localhost:9400/metrics | grep gpu_bench_power
+```
+
+Every reading the dashboard shows is there in base units — `gpu_bench_temperature_celsius{sensor="gpu"|"memory"}`, `gpu_bench_power_watts` and the native sampler's `gpu_bench_power_peak_watts`, `gpu_bench_energy_joules_total` (a counter, so `rate()` of it is power), `gpu_bench_utilization_ratio`, `gpu_bench_memory_used_bytes`, `gpu_bench_sm_clock_hertz`, `gpu_bench_throttled{reason="power"|"thermal"}` — plus `gpu_bench_training_step`, `gpu_bench_training_tokens_per_second`, `gpu_bench_training_loss`, and a `gpu_bench_run_info` carrying the card, model and precision as labels. A reading the card does not report is left out rather than exported as zero. The server binds to 127.0.0.1 unless told otherwise (`--metrics-host 0.0.0.0`, inside a container), and the format is written by hand — a dozen lines with HELP and TYPE per family and label values escaped as the spec requires — rather than pulling in a dependency for one endpoint.
+
 ### Run history
 
 Every exported run — from the window, a headless run, a series or a sweep — is also added to a run history: one SQLite database in the user's data directory (`~/.local/share/ai-gpu-benchmark` on Linux, `%LOCALAPPDATA%\AI-GPU-Benchmark` on Windows, `~/Library/Application Support/AI-GPU-Benchmark` on macOS, or wherever `GPU_BENCH_HOME` points). It keeps the figures runs are compared by, plus each whole report as JSON, and points at the files rather than replacing them — they stay the record, and the history can be rebuilt from them at any time:
@@ -247,6 +258,7 @@ gpu_bench/
     html_report.py             — the same run as one self-contained HTML page
     sweep_report.py            — a sweep as one page: the speed/efficiency chart with its Pareto front, and the table
     history.py                 — the run history: every exported report indexed in SQLite, schema migrated by user_version
+    prometheus.py              — live telemetry in Prometheus' text format, served on a daemon thread with --metrics-port
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU

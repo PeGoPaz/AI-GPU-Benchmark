@@ -21,6 +21,7 @@ from gpu_bench.batch import EXIT_INTERRUPTED, Cooldown, Series, Sweep, grid
 from gpu_bench.core.telemetry import TelemetryWorker, read_vram_total_mib
 from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
+    GRADIENT_ACCUMULATION_STEPS,
     MODELS,
     PRECISIONS,
     PRESETS,
@@ -35,6 +36,7 @@ from gpu_bench.core.trainer import (
 from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
 from gpu_bench.utils.history import History, record_run
 from gpu_bench.utils.logger import BenchmarkLogger, ExportPaths
+from gpu_bench.utils.prometheus import MetricsServer, MetricsState
 from gpu_bench.utils.report import build_report
 
 # Workload flags. Each one overrides the preset; left out, the preset decides.
@@ -133,6 +135,14 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--cooldown", type=_at_least(0), default=0, metavar="SECONDS",
                        help="between runs, wait up to this long for the GPU to cool back "
                             "to its starting temperature (default: 0, no wait)")
+
+    monitoring = parser.add_argument_group("monitoring (headless only)")
+    monitoring.add_argument("--metrics-port", type=_at_least(0), metavar="PORT",
+                            help="serve live telemetry for Prometheus at "
+                                 "http://HOST:PORT/metrics while the runs last")
+    monitoring.add_argument("--metrics-host", default="127.0.0.1", metavar="HOST",
+                            help="address to serve metrics on (default: 127.0.0.1, this "
+                                 "machine only; 0.0.0.0 inside a container)")
     return parser
 
 
@@ -220,6 +230,8 @@ def gui_only_misuse(args: argparse.Namespace) -> str | None:
         given.append("--cooldown")
     if args.sweep:
         given.append("--sweep")
+    if args.metrics_port is not None:
+        given.append("--metrics-port")
     if not args.headless and given:
         return (f"{', '.join(given)} only apply with --headless; "
                 "the window has its own Workload panel.")
@@ -257,7 +269,8 @@ class HeadlessRun(QObject):
                  out: TextIO | None = None,
                  trainer_cls: type[TrainerWorker] = TrainerWorker,
                  telemetry_cls: type[TelemetryWorker] = TelemetryWorker,
-                 interval_ms: int = 250, parent: QObject | None = None) -> None:
+                 interval_ms: int = 250, metrics: MetricsState | None = None,
+                 parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.workload = workload
         self.output_dir = output_dir
@@ -277,7 +290,10 @@ class HeadlessRun(QObject):
         self._last_loss: float | None = None
         self._interrupted = False
 
+        self.metrics = metrics
         self.telemetry = telemetry_cls(interval_ms=interval_ms)
+        if metrics is not None:
+            self.telemetry.data_updated.connect(metrics.update_telemetry)
         self.telemetry.data_updated.connect(self.logger.log)
         self.telemetry.device_info_ready.connect(self._on_device_info)
         self.telemetry.sampler_status.connect(self._on_sampler_status)
@@ -304,6 +320,8 @@ class HeadlessRun(QObject):
             f"{w['seq_len']} tokens, checkpointing "
             f"{'on' if w['gradient_checkpointing'] else 'off'} "
             f"(weights ≈ {estimate_weights_gib(w['model'], w['precision']):.1f} GiB)")
+        if self.metrics is not None:
+            self.metrics.set_run(None, w["model"].label, w["precision"].label, __version__)
         self.logger.start()
         self.telemetry.start()
         self.trainer.start()
@@ -318,6 +336,11 @@ class HeadlessRun(QObject):
     @pyqtSlot(dict)
     def _on_device_info(self, info: dict[str, Any]) -> None:
         self._device = info
+        if self.metrics is not None:
+            w = self.workload
+            self.metrics.set_run(info.get("name"), w["model"].label, w["precision"].label,
+                                 __version__)
+            self.metrics.set_power_limit(info.get("power_limit_w"))
         self._print(f"GPU: {info.get('name')}, driver {info.get('driver_version') or '?'}, "
                     f"CUDA {info.get('cuda_driver_version') or '?'}")
 
@@ -344,6 +367,11 @@ class HeadlessRun(QObject):
     @pyqtSlot(int)
     def _on_progress(self, step: int) -> None:
         rate = self._rate.update(step)
+        if self.metrics is not None:
+            w = self.workload
+            tokens_per_step = w["batch_size"] * GRADIENT_ACCUMULATION_STEPS * w["seq_len"]
+            self.metrics.update_progress(step, self._total or None,
+                                         rate * tokens_per_step if rate else None)
         # A line per step would scroll a long run off any terminal; twenty
         # updates across the run, plus the last step, are plenty.
         every = max(1, self._total // 20)
@@ -358,6 +386,8 @@ class HeadlessRun(QObject):
         self._loss_steps.append(step)
         self._loss_values.append(loss)
         self._last_loss = loss
+        if self.metrics is not None:
+            self.metrics.update_loss(loss)
 
     @pyqtSlot(dict)
     def _on_finished(self, summary: dict[str, Any]) -> None:
@@ -488,17 +518,34 @@ def run_headless(args: argparse.Namespace) -> int:
     app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
     workload = workload_from_args(args)
 
+    metrics: MetricsState | None = None
+    server: MetricsServer | None = None
+    if args.metrics_port is not None:
+        metrics = MetricsState()
+        try:
+            server = MetricsServer(metrics, args.metrics_port, args.metrics_host)
+        except OSError as e:
+            print(f"Cannot serve metrics on {args.metrics_host}:{args.metrics_port}: {e}",
+                  file=sys.stderr)
+            return 1
+        server.start()
+        host, port = server.address
+        print(f"Metrics: http://{host}:{port}/metrics", flush=True)
+
+    def make_run(run_workload: dict[str, Any], output_dir: str) -> HeadlessRun:
+        return HeadlessRun(run_workload, output_dir, metrics=metrics)
+
     cooldown = Cooldown(args.cooldown)
     run: HeadlessRun | Series | Sweep
     if args.sweep:
         configs, skipped = split_by_fit(grid(workload, args.sweep), read_vram_total_mib())
-        run = Sweep(configs, list(args.sweep), HeadlessRun, args.repeat, args.output_dir,
+        run = Sweep(configs, list(args.sweep), make_run, args.repeat, args.output_dir,
                     cooldown=cooldown, skipped=skipped)
     elif args.repeat > 1:
-        run = Series(lambda: HeadlessRun(workload, args.output_dir), args.repeat,
+        run = Series(lambda: make_run(workload, args.output_dir), args.repeat,
                      args.output_dir, cooldown=cooldown)
     else:
-        run = HeadlessRun(workload, args.output_dir)
+        run = make_run(workload, args.output_dir)
     run.done.connect(app.exit)
 
     # Python only runs signal handlers between bytecodes, and Qt's event loop
@@ -510,4 +557,8 @@ def run_headless(args: argparse.Namespace) -> int:
     wake.start(200)
 
     QTimer.singleShot(0, run.start)
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        if server is not None:
+            server.stop()
