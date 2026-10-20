@@ -42,7 +42,8 @@ jobs:
             exit 1
           fi
 
-      # The section between "## [<version>]" and the next "## [" heading.
+      # The section between "## [<version>]" and the next "## [" heading,
+      # without the link definitions that close the file.
       - name: Release notes from the changelog
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -50,6 +51,7 @@ jobs:
           awk -v v="$VERSION" '
             index($0, "## [" v "]") == 1 { found = 1; next }
             found && /^## \[/ { exit }
+            found && /^\[[^]]+\]: / { next }
             found { print }
           ' CHANGELOG.md 2>/dev/null > notes.md || true
           if [ ! -s notes.md ]; then

@@ -1,8 +1,18 @@
 # AI-GPU-Benchmark
 
 [![CI](https://github.com/PeGoPaz/AI-GPU-Benchmark/actions/workflows/ci.yml/badge.svg)](https://github.com/PeGoPaz/AI-GPU-Benchmark/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/PeGoPaz/AI-GPU-Benchmark)](https://github.com/PeGoPaz/AI-GPU-Benchmark/releases)
 
 GPU benchmarking tool — measures AI training throughput via LoRA fine-tuning and monitors real-time GPU telemetry on NVIDIA cards.
+
+## Highlights
+
+- **Numbers that compare across cards.** Tokens/sec, tokens per joule, and MFU against a peak computed from the card's architecture, SM count and clock — pinned in tests to NVIDIA's whitepaper figures.
+- **Analysis, not just averages.** Energy per training step, step-time tails and jitter, a fitted thermal model that says whether the run reached steady state, and when throttling began.
+- **Repeatable results.** `--repeat` with robust outlier rejection, `--cooldown` between runs, and `--sweep` over a grid of settings ranked by its Pareto front of speed against efficiency.
+- **C++ where Python can't keep up.** An optional 500 Hz power sampler: its own thread outside the GIL, a lock-free ring buffer, NVML loaded at run time, tested under ASan, UBSan and TSan, shipped as prebuilt wheels.
+- **Built to run unattended.** Headless mode, a CUDA container image, a Prometheus endpoint with a Grafana dashboard, a SQLite history of every run, and self-contained HTML reports.
+- **Engineered like a product.** Strict mypy, property-based tests, a coverage floor, CI on Linux, Windows and macOS, and tagged releases with wheels and an image — all of it testable without a GPU.
 
 ---
 
