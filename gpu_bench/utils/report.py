@@ -10,6 +10,9 @@ when that rule has to be broken.
 import importlib.metadata
 import platform
 from datetime import datetime, timezone
+from typing import Any
+
+import pandas as pd
 
 from gpu_bench import __version__
 from gpu_bench.core.metrics import compute_stats
@@ -39,9 +42,11 @@ def package_versions() -> dict[str, str | None]:
     return versions
 
 
-def build_report(df, summary: dict, device: dict | None = None,
+def build_report(df: pd.DataFrame, summary: dict[str, Any],
+                 device: dict[str, Any] | None = None,
                  loss: tuple[list[int], list[float]] | None = None,
-                 trace=None, sampler: dict | None = None) -> dict:
+                 trace: pd.DataFrame | None = None,
+                 sampler: dict[str, Any] | None = None) -> dict[str, Any]:
     """Assembles the report for a finished run. File paths are added on export.
 
     `sampler` is the telemetry thread's description of how power was sampled;

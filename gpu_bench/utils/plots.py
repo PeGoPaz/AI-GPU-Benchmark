@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from numpy.typing import ArrayLike
 
 from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
@@ -35,7 +36,7 @@ def _merge_legends(ax: Axes, twin: Axes) -> None:
     ax.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
 
 
-def throttle_spans(df, bits: int) -> list[tuple[float, float]]:
+def throttle_spans(df: pd.DataFrame, bits: int) -> list[tuple[float, float]]:
     """(start, end) times of each stretch where any of the bits was set.
 
     A stretch runs to the poll after its last flagged one, so a single
@@ -60,7 +61,7 @@ def throttle_spans(df, bits: int) -> list[tuple[float, float]]:
     return spans
 
 
-def _shade_throttling(ax: Axes, df) -> None:
+def _shade_throttling(ax: Axes, df: pd.DataFrame) -> None:
     """Shades where the card was held back, so a clock dip has a stated cause."""
     for bits, color, label in ((POWER_LIMIT_BITS, POWER_LIMIT_COLOR, 'Power-limited'),
                                (THERMAL_LIMIT_BITS, THERMAL_LIMIT_COLOR, 'Thermal-limited')):
@@ -70,7 +71,8 @@ def _shade_throttling(ax: Axes, df) -> None:
                        label=label if i == 0 else None)
 
 
-def envelope(x, y, max_points: int = 4000):
+def envelope(x: ArrayLike, y: ArrayLike,
+             max_points: int = 4000) -> tuple[np.ndarray, np.ndarray]:
     """Thins a long trace for drawing without losing its extremes.
 
     Plain decimation (every n-th point) would drop exactly the one-sample
@@ -89,7 +91,8 @@ def envelope(x, y, max_points: int = 4000):
     return x[keep], y[keep]
 
 
-def draw_thermal_power(ax: Axes, df, trace=None) -> Axes:
+def draw_thermal_power(ax: Axes, df: pd.DataFrame,
+                       trace: pd.DataFrame | None = None) -> Axes:
     """GPU temperature on the left axis, power draw on a twin. Returns the twin.
 
     With the native sampler's trace, instantaneous power is drawn faintly
@@ -117,7 +120,7 @@ def draw_thermal_power(ax: Axes, df, trace=None) -> Axes:
     return twin
 
 
-def draw_utilization(ax: Axes, df) -> Axes:
+def draw_utilization(ax: Axes, df: pd.DataFrame) -> Axes:
     """Utilization and fan on a 0–105 % axis, SM clock on a twin. Returns the twin."""
     ax.plot(df['time_sec'], df['gpu_util_pct'], color=UTIL_COLOR,
             label='GPU Utilization (%)', linewidth=2)
@@ -169,7 +172,7 @@ def draw_loss(ax: Axes, steps: list[int], losses: list[float],
         ax.legend(loc='upper right')
 
 
-def build_report_figure(df, trace=None) -> Figure:
+def build_report_figure(df: pd.DataFrame, trace: pd.DataFrame | None = None) -> Figure:
     """Both panels stacked, as written to the exported PNG.
 
     A bare Figure rather than pyplot: pyplot keeps a global registry of open

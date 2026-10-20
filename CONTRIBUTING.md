@@ -54,7 +54,7 @@ Four blocks, roughly ordered — later ones build on earlier ones, and each is a
 
 Self-contained, a file or two each. Good first PRs.
 
-- **Finish the annotations.** `mypy.ini` is deliberately loose — it catches misuse, not missing types. Turning on `--disallow-untyped-defs` reports 71 gaps and `--strict` reports 162, most of them a mechanical `-> None` on a Qt slot or an untyped `__init__` in the window. Add them a module at a time, tightening the config as each one goes clean; `gpu_bench/core/metrics.py` and `gpu_bench/utils/report.py` are nearly there already.
+- **Finish the annotations.** `gpu_bench/core` and `gpu_bench/utils` are type-checked strictly (see the end of `mypy.ini`); the UI and the CLI are not yet, and `mypy --strict` lists what is left there — most of it a mechanical `-> None` on a Qt slot or an untyped `__init__` in the window. Add them a module at a time, widening the strict section as each one goes clean.
 - **BF16 fallback.** BF16 and the INT4 recipe both compute in BF16, which needs compute capability 8.0 (Ampere) or newer. `torch.cuda.get_device_capability()` can drive a warning in the fit hint, the same way VRAM does, and suggest FP16 — or an INT4 variant computing in FP16 — on older cards.
 - **Longer sequences.** The selector stops at 2048 tokens: the whole context of TinyLlama and Phi-2, but a fraction of Qwen2.5's 32k and Phi-3.5's 128k. Offering 4096 and up needs `ModelSpec` to carry each model's context length, so the selector can grey out what a model never saw.
 

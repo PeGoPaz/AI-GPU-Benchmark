@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -17,24 +17,28 @@ class ExportPaths(NamedTuple):
     html: str | None = None          # the human-readable page, with a report
 
 
+# One batch from the native sampler: (unix seconds, watts) arrays.
+PowerChunk = tuple[np.ndarray, np.ndarray]
+
+
 class BenchmarkLogger:
-    def __init__(self):
-        self.data = []
-        self.trace_chunks = []
+    def __init__(self) -> None:
+        self.data: list[dict[str, Any]] = []
+        self.trace_chunks: list[PowerChunk] = []
         self.is_logging = False
 
-    def start(self):
+    def start(self) -> None:
         """Clears old data and starts listening for new telemetry."""
         self.data = []
         self.trace_chunks = []
         self.is_logging = True
 
-    def log(self, telemetry_data: dict):
+    def log(self, telemetry_data: dict[str, Any]) -> None:
         """Appends a row of data if a benchmark is currently running."""
         if self.is_logging:
             self.data.append(telemetry_data)
 
-    def log_power_trace(self, chunk) -> None:
+    def log_power_trace(self, chunk: PowerChunk) -> None:
         """Keeps a (seconds, watts) batch from the native sampler while logging.
 
         Stored as the arrays it arrived in and only joined on request: at
@@ -84,9 +88,9 @@ class BenchmarkLogger:
 
     @staticmethod
     def export(df: pd.DataFrame, output_dir: str = "logs",
-               report: dict | None = None,
+               report: dict[str, Any] | None = None,
                trace: pd.DataFrame | None = None,
-               summary: dict | None = None) -> ExportPaths:
+               summary: dict[str, Any] | None = None) -> ExportPaths:
         """Writes the collected telemetry to CSV and generates a plot PNG.
 
         With a report (see gpu_bench.utils.report), also writes it as JSON beside
@@ -132,5 +136,6 @@ class BenchmarkLogger:
         return ExportPaths(csv_path, plot_path, report_path, trace_path, html_path)
 
     @staticmethod
-    def _generate_plot(df, save_path, trace=None):
+    def _generate_plot(df: pd.DataFrame, save_path: str,
+                       trace: pd.DataFrame | None = None) -> None:
         build_report_figure(df, trace).savefig(save_path, dpi=300)

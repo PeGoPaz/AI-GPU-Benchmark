@@ -1,10 +1,12 @@
 import gc
 import time
 import types
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any, Protocol, TypeVar
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 
 @lru_cache(maxsize=1)
@@ -174,7 +176,15 @@ class WorkloadPreset:
     description: str
 
 
-def _find(registry, label):
+class _Labelled(Protocol):
+    @property
+    def label(self) -> str: ...
+
+
+_Spec = TypeVar("_Spec", bound=_Labelled)
+
+
+def _find(registry: Iterable[_Spec], label: str) -> _Spec:
     return next(spec for spec in registry if spec.label == label)
 
 
@@ -198,7 +208,7 @@ PRESETS = (
 DEFAULT_PRESET = _find(PRESETS, "Standard")
 
 
-def quantization_config(precision: PrecisionSpec):
+def quantization_config(precision: PrecisionSpec) -> Any:
     """bitsandbytes settings for a quantized precision, None for a plain dtype."""
     if precision.quant_bits is None:
         return None
@@ -253,7 +263,7 @@ def pack_tokens(sequences: list[list[int]], seq_len: int,
     return [stream[i * seq_len:(i + 1) * seq_len] for i in range(n_blocks)]
 
 
-def collate_packed(rows):
+def collate_packed(rows: list[dict[str, list[int]]]) -> dict[str, Any]:
     """Stacks packed rows into a batch. No padding, so the mask is all ones."""
     torch = _hf().torch
     input_ids = torch.tensor([row["input_ids"] for row in rows])
@@ -271,10 +281,12 @@ class ProgressCallbackLogic:
     starts: subclassing it here would import transformers with this module.
     Kept separate so the behaviour is testable on its own.
     """
-    def __init__(self, worker):
+    def __init__(self, worker: "TrainerWorker") -> None:
         self.worker = worker
 
-    def on_step_end(self, args, state, control, **kwargs):
+    # The arguments are transformers' TrainingArguments, TrainerState and
+    # TrainerControl, which this module must not import at load time.
+    def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         # Abort training if the user pressed Stop or closed the window
         if not self.worker._is_running:
             control.should_training_stop = True
@@ -296,7 +308,8 @@ class ProgressCallbackLogic:
 
         self.worker.progress_updated.emit(state.global_step)
 
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_log(self, args: Any, state: Any, control: Any,
+               logs: dict[str, float] | None = None, **kwargs: Any) -> None:
         # The loss comes from here rather than from log_history in
         # on_step_end: HF logs a step only after its on_step_end callbacks
         # have run, so reading it there always reported the previous step.
@@ -305,14 +318,15 @@ class ProgressCallbackLogic:
             self.worker.loss_updated.emit(state.global_step, float(logs["loss"]))
 
 
-def progress_callback(worker):
+def progress_callback(worker: "TrainerWorker") -> ProgressCallbackLogic:
     """The callback the Trainer gets: our logic first, HF's no-op hooks after.
 
     TrainerCallback supplies a do-nothing method for every event the Trainer
     fires, which is why the logic is mixed into it rather than handed over
     alone.
     """
-    cls = type("PyQtProgressCallback", (ProgressCallbackLogic, _hf().TrainerCallback), {})
+    cls: type[ProgressCallbackLogic] = type(
+        "PyQtProgressCallback", (ProgressCallbackLogic, _hf().TrainerCallback), {})
     return cls(worker)
 
 
@@ -328,7 +342,8 @@ class TrainerWorker(QThread):
                  model: ModelSpec = DEFAULT_MODEL, warmup_steps: int = 10,
                  precision: PrecisionSpec = DEFAULT_PRECISION,
                  seq_len: int = DEFAULT_SEQ_LEN,
-                 gradient_checkpointing: bool = False, parent=None):
+                 gradient_checkpointing: bool = False,
+                 parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.steps = steps
         self.batch_size = batch_size
@@ -343,7 +358,7 @@ class TrainerWorker(QThread):
         self.measure_start: float | None = None
         self._is_running = True
 
-    def run(self):
+    def run(self) -> None:
         try:
             # Warm-up steps really are executed, so the progress bar has to
             # span them too or it would sit at 100% for the whole timed part.
@@ -366,10 +381,10 @@ class TrainerWorker(QThread):
             tokenizer = hf.AutoTokenizer.from_pretrained(model_id)
             tokenizer.pad_token = tokenizer.eos_token
 
-            def tokenize(batch):
+            def tokenize(batch: dict[str, list[str]]) -> Any:
                 return tokenizer(batch["quote"])
 
-            def pack(batch):
+            def pack(batch: dict[str, list[list[int]]]) -> dict[str, list[list[int]]]:
                 return {"input_ids": pack_tokens(batch["input_ids"], self.seq_len,
                                                  tokenizer.eos_token_id)}
 
@@ -518,7 +533,7 @@ class TrainerWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(f"HF Training Error: {str(e)}")
 
-    def stop(self):
+    def stop(self) -> None:
         """Requests an early stop without blocking the caller.
 
         This is called from the UI thread, so it must NOT wait() — the current

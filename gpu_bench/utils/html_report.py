@@ -8,7 +8,10 @@ light or dark preference.
 """
 import html
 import io
+from collections.abc import Iterable, Sequence
+from typing import Any
 
+import pandas as pd
 from matplotlib.figure import Figure
 
 from gpu_bench.utils.display import headline_cards, summary_rows
@@ -55,7 +58,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
 """
 
 
-def _e(value) -> str:
+def _e(value: object) -> str:
     return html.escape("" if value is None else str(value))
 
 
@@ -67,12 +70,12 @@ def figure_svg(fig: Figure) -> str:
     return text[text.index("<svg"):]
 
 
-def _table(rows) -> str:
+def _table(rows: Iterable[tuple[str, str]]) -> str:
     body = "".join(f"<tr><td>{_e(k)}</td><td>{_e(v)}</td></tr>" for k, v in rows)
     return f"<table>{body}</table>"
 
 
-def _loss_svg(loss) -> str | None:
+def _loss_svg(loss: tuple[Sequence[int], Sequence[float]]) -> str | None:
     steps, values = loss
     if not steps:
         return None
@@ -82,7 +85,8 @@ def _loss_svg(loss) -> str | None:
     return figure_svg(fig)
 
 
-def build_html(report: dict, df, summary: dict, trace=None) -> str:
+def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any],
+               trace: pd.DataFrame | None = None) -> str:
     """The page for one run: headline cards, charts, and every number behind them."""
     gpu = report.get("gpu") or {}
     workload = report.get("workload") or {}

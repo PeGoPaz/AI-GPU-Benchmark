@@ -6,6 +6,9 @@ be on course for two copies of the formatting, the way the charts once were.
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
+
+import pandas as pd
 
 from gpu_bench.core.metrics import compute_stats
 
@@ -41,7 +44,8 @@ def format_progress(step: int, total: int, steps_per_sec: float | None) -> str:
     return text
 
 
-def summary_rows(df, summary: dict, trace=None) -> list[tuple[str, str]]:
+def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
+                 trace: pd.DataFrame | None = None) -> list[tuple[str, str]]:
     """The summary table as (metric, value) pairs, ready to display."""
     stats = compute_stats(df, summary, trace)
 
@@ -130,7 +134,8 @@ class Headline:
     caption: str = ""
 
 
-def headline_cards(df, summary: dict, trace=None) -> list[Headline]:
+def headline_cards(df: pd.DataFrame, summary: dict[str, Any],
+                   trace: pd.DataFrame | None = None) -> list[Headline]:
     """The run in five numbers: rate, compute, efficiency, peak power, peak heat.
 
     The full table still has everything; these are what people compare runs

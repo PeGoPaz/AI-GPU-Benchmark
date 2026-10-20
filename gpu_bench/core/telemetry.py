@@ -1,9 +1,17 @@
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import pynvml
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from gpu_bench.core.power_sampler import describe_status, open_sampler
+
+# nvidia-ml-py ships no type information: its device handle is an opaque
+# ctypes pointer, and every getter returns whatever NVML put in the struct.
+Handle = Any
+
+_T = TypeVar("_T")
 
 # nvmlDeviceGetTemperature takes sensor 0 (GPU core) and, since NVML 13,
 # sensor 1 (NVML_TEMPERATURE_GPU_MAX). The junction/hotspot sensor is NOT
@@ -60,7 +68,7 @@ def decode_throttle_reasons(mask: int | None) -> list[str]:
     return [label for bit, label in THROTTLE_LABELS if int(mask) & bit]
 
 
-def read_field_values(handle, field_ids: list[int]) -> dict[int, float]:
+def read_field_values(handle: Handle, field_ids: list[int]) -> dict[int, float]:
     """Reads NVML field values, returning {field_id: value} for successful reads.
 
     Fields the GPU/driver does not support are omitted rather than raising, so
@@ -82,7 +90,7 @@ def read_field_values(handle, field_ids: list[int]) -> dict[int, float]:
     return result
 
 
-def _try_read(fn, *args):
+def _try_read(fn: Callable[..., _T], *args: Any) -> _T | None:
     """Calls an NVML getter, returning None when this GPU or driver lacks it.
 
     Unlike the core temperature and power readings, fan and PCIe queries are
@@ -97,7 +105,7 @@ def _try_read(fn, *args):
         return None
 
 
-def read_fan_speed_pct(handle, num_fans: int | None) -> float | None:
+def read_fan_speed_pct(handle: Handle, num_fans: int | None) -> float | None:
     """Highest fan duty cycle on the card, or None if it exposes no fans.
 
     The maximum across fans is the number worth watching: fans pegged at 100%
@@ -105,15 +113,16 @@ def read_fan_speed_pct(handle, num_fans: int | None) -> float | None:
     getter still answer the unindexed one.
     """
     if not num_fans:
-        return _try_read(pynvml.nvmlDeviceGetFanSpeed, handle)
+        speed = _try_read(pynvml.nvmlDeviceGetFanSpeed, handle)
+        return float(speed) if speed is not None else None
 
     speeds = [speed for fan in range(num_fans)
               if (speed := _try_read(pynvml.nvmlDeviceGetFanSpeed_v2, handle, fan))
               is not None]
-    return max(speeds) if speeds else None
+    return float(max(speeds)) if speeds else None
 
 
-def read_pcie_link(handle) -> tuple[int | None, int | None]:
+def read_pcie_link(handle: Handle) -> tuple[int | None, int | None]:
     """Current PCIe generation and width.
 
     Polled rather than read once: the link drops to a lower generation at idle
@@ -124,7 +133,7 @@ def read_pcie_link(handle) -> tuple[int | None, int | None]:
             _try_read(pynvml.nvmlDeviceGetCurrPcieLinkWidth, handle))
 
 
-def read_throttle_reasons(handle) -> int | None:
+def read_throttle_reasons(handle: Handle) -> int | None:
     """The current throttle bitmask, None if the driver cannot say.
 
     The getter was renamed along with the constants. Newer drivers answer
@@ -137,7 +146,7 @@ def read_throttle_reasons(handle) -> int | None:
             continue
         mask = _try_read(getter, handle)
         if mask is not None:
-            return mask
+            return int(mask)
     return None
 
 
@@ -148,14 +157,14 @@ def format_cuda_version(version: int | None) -> str | None:
     return f"{version // 1000}.{(version % 1000) // 10}"
 
 
-def _decode(value):
+def _decode(value: Any) -> Any:
     """Some nvidia-ml-py versions return bytes for strings, others str."""
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value
 
 
-def read_device_info(handle, gpu_name: str) -> dict:
+def read_device_info(handle: Handle, gpu_name: str) -> dict[str, Any]:
     """What a run report needs to say which card, driver and limits it ran on.
 
     Read once — none of it changes while the app is open. The enforced power
@@ -188,12 +197,12 @@ class TelemetryWorker(QThread):
     # Once, after NVML is up: whether native sampling is active, and why not.
     sampler_status = pyqtSignal(dict)
 
-    def __init__(self, interval_ms: int = 250, parent=None):
+    def __init__(self, interval_ms: int = 250, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.interval_ms = interval_ms
         self._is_running = True
 
-    def run(self):
+    def run(self) -> None:
         """Main thread loop polling NVML at the given interval."""
         try:
             pynvml.nvmlInit()
@@ -320,7 +329,7 @@ class TelemetryWorker(QThread):
         except Exception:
             pass
 
-    def stop(self):
+    def stop(self) -> None:
         """Safely signals the thread loop to terminate."""
         self._is_running = False
         self.wait()

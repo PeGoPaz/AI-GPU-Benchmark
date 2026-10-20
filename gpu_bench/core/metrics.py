@@ -8,6 +8,9 @@ Steps/sec on its own is not comparable between runs: a step at batch 1 and
 512 tokens is an eighth of the work of one at batch 2 and 2048. Tokens/sec
 normalises that, and the energy figures say what the throughput cost.
 """
+from collections.abc import Sequence
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -66,7 +69,8 @@ def limited_share(df: pd.DataFrame, bits: int) -> float | None:
     return float((masks.astype('int64') & bits).astype(bool).mean() * 100)
 
 
-def trapezoid_joules(timestamps, watts) -> float:
+def trapezoid_joules(timestamps: Sequence[float] | np.ndarray | pd.Series,
+                     watts: Sequence[float] | np.ndarray | pd.Series) -> float:
     """Energy under a power curve sampled at arbitrary times."""
     t = np.asarray(timestamps, dtype=float)
     p = np.asarray(watts, dtype=float)
@@ -75,7 +79,7 @@ def trapezoid_joules(timestamps, watts) -> float:
     return float(((p[1:] + p[:-1]) / 2 * (t[1:] - t[:-1])).sum())
 
 
-def transient_stats(trace: pd.DataFrame | None) -> dict:
+def transient_stats(trace: pd.DataFrame | None) -> dict[str, Any]:
     """What the native sampler's trace shows that the 250 ms polls cannot.
 
     The peak and p99 of instantaneous power, how far the peak sits above the
@@ -111,8 +115,8 @@ def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     return float(getattr(df[column], how)())
 
 
-def compute_stats(df: pd.DataFrame, summary: dict,
-                  trace: pd.DataFrame | None = None) -> dict:
+def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
+                  trace: pd.DataFrame | None = None) -> dict[str, Any]:
     """Everything the summary table shows, as numbers.
 
     Optional readings (memory temperature, fan, PCIe) come back as None on
@@ -120,7 +124,7 @@ def compute_stats(df: pd.DataFrame, summary: dict,
     the summary predates them or the timed window never opened. The
     transient figures need the native sampler's trace and are None without it.
     """
-    stats: dict = {
+    stats: dict[str, Any] = {
         'avg_temp_c': float(df['temp_gpu'].mean()),
         'max_temp_c': float(df['temp_gpu'].max()),
         'avg_power_w': float(df['power_w'].mean()),
