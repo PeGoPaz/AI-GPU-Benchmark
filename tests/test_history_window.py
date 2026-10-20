@@ -142,3 +142,48 @@ def test_import_folder_adds_reports_and_refreshes(qapp, tmp_path):
 
     assert window.proxy.rowCount() == 1
     assert "Imported 1 runs" in window.lbl_status.text()
+
+
+def _row(gpu, model, tokens, created):
+    from gpu_bench.utils.history import HistoryRow
+    return HistoryRow(report_path=f"/r/{created}.json", created_at=created, gpu=gpu,
+                      model=model, precision="BF16", batch_size=2, seq_len=512,
+                      tokens_per_sec=tokens, tokens_per_joule=None, mfu=0.25,
+                      max_temp_c=None)
+
+
+def test_trend_series_groups_by_card_and_model_in_time_order():
+    rows = [_row("4060", "Qwen", 2.0, "2026-10-20T10:00:00"),
+            _row("4060", "Qwen", 1.0, "2026-10-18T10:00:00"),
+            _row("3070", "Qwen", 5.0, "2026-10-19T10:00:00"),
+            _row("3070", "Qwen", None, "2026-10-21T10:00:00"),
+            _row("3070", "Qwen", 6.0, "not a date")]
+
+    series = hw.trend_series(rows, "tokens_per_sec")
+
+    assert list(series) == ["3070 · Qwen", "4060 · Qwen"]
+    assert series["4060 · Qwen"][1] == [1.0, 2.0]
+    assert series["3070 · Qwen"][1] == [5.0]
+    assert hw.trend_series(rows, "mfu", 100.0)["4060 · Qwen"][1] == [25.0, 25.0]
+
+
+def test_trend_chart_follows_the_filter_and_the_metric(qapp, filled):
+    window = hw.HistoryWindow()
+
+    assert sorted(window.trend_curves) == ["NVIDIA GeForce RTX 4060 · Qwen2.5 1.5B",
+                                           "NVIDIA GeForce RTX 4060 · TinyLlama 1.1B"]
+    window.filter.setText("tinyllama")
+    assert list(window.trend_curves) == ["NVIDIA GeForce RTX 4060 · TinyLlama 1.1B"]
+
+    window.filter.setText("")
+    window.cmb_metric.setCurrentIndex(3)                       # max temperature
+    assert len(window.trend_curves) == 3
+    assert window.trend_plot.getAxis("left").labelText == "Max temperature (°C)"
+
+
+def test_trend_chart_takes_the_theme(qapp, filled):
+    from gpu_bench.ui.style import DARK
+
+    window = hw.HistoryWindow(theme=DARK)
+
+    assert window.trend_plot.backgroundBrush().color().name() == DARK.chart_bg.lower()

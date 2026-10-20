@@ -625,6 +625,8 @@ class MainWindow(QMainWindow):
             gauge.set_theme(theme)
         for tile in self.tiles.values():
             tile.set_theme(theme)
+        if self._history_window is not None:
+            self._history_window.set_theme(theme)
 
     def about_dialog(self) -> AboutDialog:
         return AboutDialog(about_rows(self._device_info, self._sampler_status), self)
@@ -1036,7 +1038,7 @@ class MainWindow(QMainWindow):
     def show_history(self) -> HistoryWindow:
         """Opens the run history, or brings the open one to the front."""
         if self._history_window is None:
-            self._history_window = HistoryWindow(compare=self.compare_runs)
+            self._history_window = HistoryWindow(compare=self.compare_runs, theme=self._theme)
         else:
             self._history_window.refresh()
         self._history_window.show()
