@@ -11,6 +11,7 @@ import importlib.metadata
 import platform
 from datetime import datetime, timezone
 
+from gpu_bench import __version__
 from gpu_bench.core.metrics import compute_stats
 
 REPORT_SCHEMA_VERSION = 1
@@ -50,6 +51,7 @@ def build_report(df, summary: dict, device: dict | None = None,
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "app_version": __version__,
         "gpu": device or {},
         "host": {
             "os": platform.platform(),

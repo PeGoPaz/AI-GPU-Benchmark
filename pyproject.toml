@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-gpu-benchmark"
+description = "LoRA fine-tuning GPU benchmark with live NVML telemetry"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["gpu", "benchmark", "nvml", "lora", "fine-tuning", "telemetry"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Benchmark",
+    "Topic :: System :: Monitoring",
+]
+# One version (gpu_bench/__init__.py) and one dependency list
+# (requirements.txt), so neither can drift from what the app reports and
+# what a plain `pip install -r requirements.txt` gets.
+dynamic = ["version", "dependencies"]
+
+[project.urls]
+Repository = "https://github.com/PeGoPaz/AI-GPU-Benchmark"
+Issues = "https://github.com/PeGoPaz/AI-GPU-Benchmark/issues"
+
+[project.scripts]
+gpu-bench = "gpu_bench.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "gpu_bench.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["gpu_bench*"]
+
+[tool.setuptools.package-data]
+"gpu_bench.ui" = ["assets/*.svg"]

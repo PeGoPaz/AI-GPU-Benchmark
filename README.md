@@ -27,11 +27,13 @@ source venv/bin/activate      # Linux/macOS
 # venv\Scripts\activate       # Windows
 ```
 
-Install dependencies:
+Install the app and its dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
+
+That puts a `gpu-bench` command on the path. To run straight from the checkout instead, `pip install -r requirements.txt` installs the same dependencies (`pyproject.toml` reads its list from that file), and `python main.py` then does everything `gpu-bench` does.
 
 ### Windows
 
@@ -50,7 +52,7 @@ Install torch **before** the rest. On Windows, a plain `pip install torch` insta
 
 ```powershell
 pip install torch --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements.txt
+pip install .
 ```
 
 bitsandbytes, for the INT8 and INT4 precisions, has shipped Windows wheels since 0.43, so `requirements.txt` covers it. `nvml.dll` comes with the NVIDIA driver; both pynvml and the native module find it in `System32` (or in `NVIDIA Corporation\NVSMI` on older drivers) without any configuration.
@@ -68,7 +70,8 @@ pip install .\native
 Activate the virtual environment (if not already active), then:
 
 ```bash
-python main.py
+gpu-bench            # or: python -m gpu_bench, or python main.py from a checkout
+gpu-bench --version
 ```
 
 The GUI window opens with:
@@ -94,9 +97,9 @@ The GUI window opens with:
 The same benchmark runs without a window — for a rented cloud GPU reached over SSH, or for scripting runs across cards:
 
 ```bash
-python main.py --headless --preset stress
-python main.py --headless --model qwen2.5-3b --precision int4 --seq-len 1024 --steps 200
-python main.py --list
+gpu-bench --headless --preset stress
+gpu-bench --headless --model qwen2.5-3b --precision int4 --seq-len 1024 --steps 200
+gpu-bench --list
 ```
 
 Flags override the preset, and models and precisions can be named by label, Hugging Face id or any unique prefix (`int4`, `phi-3.5-mini`); an ambiguous one such as `qwen2.5` is refused with the candidates listed. Progress prints about twenty times per run, the summary table at the end, and the CSV, PNG and JSON report are always written to `--output-dir` (default `logs/`). Ctrl+C stops at the next step boundary and still writes the results. The exit status is 0 for a complete run, 130 for one stopped with Ctrl+C, and 1 for a failure — including no telemetry at all, since numbers without the card's readings are not worth keeping. Headless mode runs on a `QCoreApplication`, so it needs no display and never loads the widget stack.
@@ -105,7 +108,7 @@ Flags override the preset, and models and precisions can be named by label, Hugg
 
 ## How It Works
 
-The benchmark runs a LoRA fine-tune (rank 8) on a small English quotes dataset using Hugging Face Transformers and PEFT. The quotes are tokenized, joined with an EOS token between them and cut into blocks of exactly the selected sequence length (128 to 2048 tokens) — padding each quote out instead would make a 1024-token run over 95% padding, work the GPU does but the model learns nothing from. Sequence length is the heaviest knob on the panel: compute and activation memory grow with it, attention quadratically. Gradient checkpointing trades the other way — activations are recomputed in the backward pass instead of stored, which cuts VRAM sharply for roughly a third more compute per step, and is what lets long sequences fit on an 8 GB card. It runs non-reentrant, and the embedding output is made to require grad: with every base weight frozen, the reentrant implementation otherwise skips the backward pass through each block and the adapters inside never train. Model, step count and per-device batch size come from the Workload panel — the Standard preset by default — and 4 gradient accumulation steps sit on top, so the effective batch is four times the one you pick. Each model carries its own LoRA target modules, since attention projections are not named alike across architectures — Phi-3.5 fuses query, key and value into one `qkv_proj`, where the others have separate `q_proj` and `v_proj`. Every model is ungated on the Hub, so no access token is needed. Precision is selectable between BF16 (the default, Ampere and newer), FP16, FP32, INT8 and INT4 — it drives the weight dtype, the Trainer's mixed-precision flags and, for the last two, a `bitsandbytes` quantization config, and is an axis worth benchmarking in its own right. INT4 is the QLoRA recipe (NF4 with double quantization, BF16 compute) and stores the frozen base model in a quarter of its 16-bit size, which is what lets the 3B–7B models train on an 8 GB card. The fit estimate knows this: quantization only shrinks the transformer body, while the embedding and LM head stay at 16 bits — on Qwen2.5 7B, 2 GiB of the 5.2 GiB total. It counts weights plus a 1 GiB floor for the CUDA context and the smallest activations, so it warns rather than blocks the Start button. PEFT's `prepare_model_for_kbit_training()` is deliberately skipped: it upcasts every non-quantized layer to FP32, and on Qwen2.5 7B the embedding and LM head alone would grow to 4.4 GB. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock, fan speed, PCIe link, cumulative energy, throttle reasons) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus the throughput and energy figures described below. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run. torch, transformers, peft and datasets are imported only when a run starts, on the training thread: they take seconds to load, and the window, the presets and `main.py --list` need none of them — so the app opens immediately, and the registries work even where the ML stack is not installed.
+The benchmark runs a LoRA fine-tune (rank 8) on a small English quotes dataset using Hugging Face Transformers and PEFT. The quotes are tokenized, joined with an EOS token between them and cut into blocks of exactly the selected sequence length (128 to 2048 tokens) — padding each quote out instead would make a 1024-token run over 95% padding, work the GPU does but the model learns nothing from. Sequence length is the heaviest knob on the panel: compute and activation memory grow with it, attention quadratically. Gradient checkpointing trades the other way — activations are recomputed in the backward pass instead of stored, which cuts VRAM sharply for roughly a third more compute per step, and is what lets long sequences fit on an 8 GB card. It runs non-reentrant, and the embedding output is made to require grad: with every base weight frozen, the reentrant implementation otherwise skips the backward pass through each block and the adapters inside never train. Model, step count and per-device batch size come from the Workload panel — the Standard preset by default — and 4 gradient accumulation steps sit on top, so the effective batch is four times the one you pick. Each model carries its own LoRA target modules, since attention projections are not named alike across architectures — Phi-3.5 fuses query, key and value into one `qkv_proj`, where the others have separate `q_proj` and `v_proj`. Every model is ungated on the Hub, so no access token is needed. Precision is selectable between BF16 (the default, Ampere and newer), FP16, FP32, INT8 and INT4 — it drives the weight dtype, the Trainer's mixed-precision flags and, for the last two, a `bitsandbytes` quantization config, and is an axis worth benchmarking in its own right. INT4 is the QLoRA recipe (NF4 with double quantization, BF16 compute) and stores the frozen base model in a quarter of its 16-bit size, which is what lets the 3B–7B models train on an 8 GB card. The fit estimate knows this: quantization only shrinks the transformer body, while the embedding and LM head stay at 16 bits — on Qwen2.5 7B, 2 GiB of the 5.2 GiB total. It counts weights plus a 1 GiB floor for the CUDA context and the smallest activations, so it warns rather than blocks the Start button. PEFT's `prepare_model_for_kbit_training()` is deliberately skipped: it upcasts every non-quantized layer to FP32, and on Qwen2.5 7B the embedding and LM head alone would grow to 4.4 GB. While training runs on the GPU, a separate thread polls NVML every 250 ms and feeds live readings (temperature, memory temperature, thermal headroom, VRAM, power, utilization, core clock, fan speed, PCIe link, cumulative energy, throttle reasons) into the UI. The BenchmarkLogger collects telemetry snapshots in memory during the run and, on completion, hands a DataFrame to the UI, which draws both matplotlib canvases and computes the summary table — averages and peaks for temperature, power and VRAM, plus the throughput and energy figures described below. The model and all GPU allocations are immediately offloaded and freed from VRAM at the end of each run. torch, transformers, peft and datasets are imported only when a run starts, on the training thread: they take seconds to load, and the window, the presets and `gpu-bench --list` need none of them — so the app opens immediately, and the registries work even where the ML stack is not installed.
 
 ### Presets
 
@@ -163,8 +166,11 @@ A falling SM clock on its own does not say whether the card hit its power limit 
 ## Architecture
 
 ```
-main.py                        — entry point: the window, or a headless run with --headless
+main.py                        — runs the app from a checkout, without installing it
+pyproject.toml                 — package metadata and the gpu-bench command; dependencies come from requirements.txt
 gpu_bench/
+  __init__.py                  — the version, in one place
+  __main__.py                  — entry point: the window, or a headless run with --headless
   cli.py                       — headless mode: argument parsing, a run wired to stdout
   ui/
     main_window.py             — GUI layout, thread wiring, summary table, console log

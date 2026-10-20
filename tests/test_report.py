@@ -3,6 +3,7 @@ import json
 
 import pandas as pd
 
+import gpu_bench
 from gpu_bench.utils import report
 
 
@@ -30,6 +31,7 @@ def test_report_says_what_ran_and_on_what(telemetry_sample):
     r = report.build_report(_df(telemetry_sample), SUMMARY, DEVICE)
 
     assert r["schema_version"] == report.REPORT_SCHEMA_VERSION
+    assert r["app_version"] == gpu_bench.__version__
     assert r["gpu"]["name"] == "NVIDIA GeForce RTX 4060"
     assert r["workload"]["model_id"] == "Qwen/Qwen2.5-1.5B-Instruct"
     assert r["workload"]["seq_len"] == 512

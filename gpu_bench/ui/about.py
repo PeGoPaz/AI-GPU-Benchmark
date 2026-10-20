@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gpu_bench import __version__
 from gpu_bench.utils.report import package_versions
 
 ICON_PATH = Path(__file__).with_name("assets") / "icon.svg"
@@ -43,6 +44,7 @@ def about_rows(device: dict | None = None, sampler: dict | None = None) -> list[
     """(label, value) pairs: platform, toolkit, ML stack, native module, GPU."""
     versions = package_versions()
     rows = [
+        ("AI GPU Benchmark", __version__),
         ("Python", f"{platform.python_version()} ({sys.platform})"),
         ("Qt / PyQt", f"{QT_VERSION_STR} / {PYQT_VERSION_STR}"),
     ]

@@ -13,6 +13,7 @@ import sys
 
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
+from gpu_bench import __version__
 from gpu_bench.core.telemetry import TelemetryWorker
 from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
@@ -75,9 +76,10 @@ def _at_least(minimum: int):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="main.py",
+        prog="gpu-bench",
         description="LoRA fine-tuning GPU benchmark. Opens the window unless "
                     "--headless is given.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--headless", action="store_true",
                         help="run without a window, print the results and exit")
     parser.add_argument("--list", action="store_true",

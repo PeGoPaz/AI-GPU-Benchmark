@@ -309,3 +309,10 @@ def test_native_status_without_the_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "nvml_sampler", None)
 
     assert about.native_module_status().startswith("not built")
+
+
+def test_about_leads_with_the_app_version():
+    import gpu_bench
+    from gpu_bench.ui.about import about_rows
+
+    assert about_rows()[0] == ("AI GPU Benchmark", gpu_bench.__version__)

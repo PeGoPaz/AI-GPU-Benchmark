@@ -6,6 +6,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Packaging
+dist/
+*.egg-info/
+
 # Tooling caches
 .ruff_cache/
 .pytest_cache/

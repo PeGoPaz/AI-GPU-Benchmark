@@ -1125,7 +1125,8 @@ def test_about_copies_its_details_for_a_bug_report(window):
     dialog.copy()
 
     copied = QApplication.clipboard().text()
-    assert copied.splitlines()[0].startswith("Python")
+    assert copied.splitlines()[0].startswith("AI GPU Benchmark")
+    assert "Python" in copied
     assert "Native module" in copied
 
 
