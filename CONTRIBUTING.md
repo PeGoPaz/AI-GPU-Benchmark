@@ -36,7 +36,7 @@ cmake -S native -B build-tsan -DPOWER_BUILD_PYTHON=OFF -DPOWER_SANITIZE=thread  
 clang-format -i $(git ls-files 'native/*.cpp' 'native/*.hpp')
 ```
 
-`tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. CI does the same on every push and PR: ruff, mypy, a parse check, and pytest on Python 3.10 and 3.13. Rules live in `ruff.toml` and `mypy.ini`; both tools are pinned in `requirements-dev.txt`, because their default rule sets shift between releases and an unpinned upgrade could turn CI red without a line of project code changing.
+`tests/conftest.py` swaps torch, transformers, peft and datasets for stubs and mocks NVML, so the suite runs on any laptop with no GPU and no multi-gigabyte install. Window tests carry the `ui` marker and skip themselves when Qt can't start headless. `tests/test_properties.py` holds the invariants — energy adding up across a split, packing losing nothing but the tail, every registry label resolving however it is typed — checked by Hypothesis on generated inputs: random locally, a fixed sequence in CI (`HYPOTHESIS_PROFILE=ci`), so a CI failure reproduces on rerun and prints the input that caused it. A new pure function in `gpu_bench/core` should get a property there as well as examples. CI does the same on every push and PR: ruff, mypy, a parse check, and pytest on Python 3.10 and 3.13. Rules live in `ruff.toml` and `mypy.ini`; both tools are pinned in `requirements-dev.txt`, because their default rule sets shift between releases and an unpinned upgrade could turn CI red without a line of project code changing.
 
 ## House rules
 

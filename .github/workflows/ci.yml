@@ -97,6 +97,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           MPLBACKEND: Agg
+          HYPOTHESIS_PROFILE: ci
         run: pytest -v
 
       # The installed package, not the checkout: catches a module or the

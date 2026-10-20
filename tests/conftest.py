@@ -4,11 +4,22 @@ The app imports torch/transformers/peft/datasets at module level and talks to
 NVML on a real NVIDIA card. CI runners have neither, so we install lightweight
 stand-ins before any `gpu_bench.*` module is imported.
 """
+import os
 import sys
 import types
 from unittest import mock
 
 import pytest
+from hypothesis import settings
+
+# Property-based tests: random inputs locally, where a new counterexample is
+# worth finding, but the same fixed sequence in CI (HYPOTHESIS_PROFILE=ci),
+# where a failure has to reproduce on a rerun. No deadline in either: a
+# shared runner pausing for a second is not a performance regression.
+settings.register_profile("dev", deadline=None)
+settings.register_profile("ci", deadline=None, derandomize=True, database=None,
+                          print_blob=True)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 # --- Stub the heavy ML stack -------------------------------------------------
 # Must happen at import time, before gpu_bench.core.trainer is pulled in.

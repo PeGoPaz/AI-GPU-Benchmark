@@ -213,7 +213,7 @@ requirements-dev.txt           — test and lint tooling (no ML stack)
 | GPU monitoring | nvidia-ml-py (PyNVML) |
 | ML training | PyTorch, Transformers, PEFT, datasets, bitsandbytes |
 | Data & plotting | pandas, pyqtgraph (live), matplotlib (export) |
-| Tests & linting | pytest, ruff, mypy |
+| Tests & linting | pytest, Hypothesis (property-based), ruff, mypy (strict) |
 
 ---
 
