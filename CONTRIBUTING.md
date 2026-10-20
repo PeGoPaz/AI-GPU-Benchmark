@@ -75,8 +75,6 @@ The C++ power sampler in `native/` is built, tested and wired in; what is left a
 
 The big one. Training is half the picture; plenty of people care more about tokens/sec and time-to-first-token. This is a second benchmark mode with its own worker, metrics and summary — build it on the settings panel, the presets and the report format, and give it a `--mode inference` in the CLI from the start.
 
-A related, smaller step on the training side: **MFU**. Est. TFLOPS divided by the card's peak dense BF16 rate gives model FLOPs utilisation — the number that actually compares across cards. It needs a peak table keyed by GPU name, which is the part worth getting right.
-
 ## Questions
 
 Open an issue or start a discussion. If you're unsure whether something's in scope, ask first — cheaper than building it and having it turned down.

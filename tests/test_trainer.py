@@ -717,3 +717,17 @@ def test_summary_carries_the_step_stamps():
     summary = run_worker(steps=30, warmup_steps=5)["summary"]
 
     assert len(summary["step_times"]) == summary["total_steps"] == 30
+
+
+def test_summary_records_what_the_peak_needs():
+    summary = run_worker(precision=trainer_module.PRECISIONS[4])["summary"]   # INT4
+
+    assert summary["compute_dtype"] == "bfloat16"
+    assert summary["sm_count"] is None        # the stubbed torch knows no GPU
+
+
+def test_sm_count_comes_from_torch():
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(
+        get_device_properties=lambda i: types.SimpleNamespace(multi_processor_count=24)))
+
+    assert trainer_module._sm_count(torch) == 24

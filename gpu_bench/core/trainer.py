@@ -274,6 +274,19 @@ def collate_packed(rows: list[dict[str, list[int]]]) -> dict[str, Any]:
     }
 
 
+def _sm_count(torch: Any) -> int | None:
+    """Streaming multiprocessors on the training GPU, for its peak throughput.
+
+    From torch rather than NVML, which only reports CUDA cores — and the
+    cores per SM differ by architecture.
+    """
+    try:
+        count = torch.cuda.get_device_properties(0).multi_processor_count
+    except Exception:
+        return None
+    return count if isinstance(count, int) else None
+
+
 class ProgressCallbackLogic:
     """What the Hugging Face progress callback does, minus transformers.
 
@@ -508,6 +521,10 @@ class TrainerWorker(QThread):
                 "seq_len": self.seq_len,
                 "gradient_checkpointing": self.gradient_checkpointing,
                 "params_b": self.model_spec.params_b,
+                # The dtype the matmuls ran in and the SM count: with the
+                # card's clock and architecture, its peak — and so MFU.
+                "compute_dtype": self.precision.dtype_name,
+                "sm_count": _sm_count(torch),
                 "tokens_per_step": (self.batch_size * GRADIENT_ACCUMULATION_STEPS
                                     * self.seq_len),
                 "warmup_steps": self.warmup_steps,

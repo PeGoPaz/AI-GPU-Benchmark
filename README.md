@@ -133,6 +133,7 @@ Steps/sec alone does not compare across runs — a step at batch 1 and 512 token
 |---|---|
 | Tokens/sec | measured steps × batch × 4 (gradient accumulation) × sequence length, over the timed window |
 | Compute (est. TFLOPS) | tokens/sec × FLOPs per token, with 4N per token for LoRA on a frozen base (forward 2N, backward through activations 2N, no weight gradients) and 6N with gradient checkpointing's recompute. Attention-score FLOPs are left out, so long sequences read somewhat low |
+| MFU / HFU | model FLOPs utilisation: tokens/sec × 4N ÷ the card's dense peak — the figure that compares across cards, where TFLOPS alone does not. The peak is computed, not looked up: SMs × max SM clock × FLOPs per clock per SM for the architecture (from the compute capability), 16-bit tensor maths with FP32 accumulate — halved on GeForce parts, as NVIDIA's whitepapers list it — or the CUDA-core rate for FP32 runs; quantized runs count against the 16-bit peak they dequantize to. The tests pin the formula to the whitepaper numbers (RTX 3090, 4090, 5090, A100, H100, …). MFU never counts recompute, so checkpointing cannot inflate it; HFU, shown with checkpointing on, is the same ratio with the recompute included |
 | Energy, timed | NVML's cumulative energy counter (Volta and newer) across the timed window — integrated on the card, so it includes the millisecond spikes a 250 ms poll misses. Older cards fall back to integrating the power samples; the label says which was used |
 | Efficiency (tokens/J) | measured tokens ÷ timed energy. Loading and warm-up are excluded on both sides of the division |
 | Peak power, instant / p99 | with the native module only: the highest and 99th-percentile reading of instantaneous power over the timed window. The 250 ms polls report a smoothed value and step over transients; this is what a PSU actually has to survive |
@@ -200,6 +201,7 @@ gpu_bench/
     telemetry.py               — TelemetryWorker (QThread): polls NVML for hardware stats, emits GPU name on startup
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window, per-step time and energy
     thermal.py                 — the first-order heating fit: τ, the steady temperature, whether the run got there
+    peak.py                    — the card's peak dense throughput from its architecture, SM count and clock, for MFU
     power_sampler.py           — opens the native sampler when it is built, explains why not when it is not
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion; imports the ML stack only when a run starts
   utils/

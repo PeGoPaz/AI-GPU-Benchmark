@@ -36,6 +36,7 @@ HIGHER, LOWER, NEUTRAL = 1, -1, 0
 METRICS = (
     ("Tokens/sec", "tokens_per_sec", "{:,.0f}", HIGHER),
     ("Compute (est. TFLOPS)", "est_tflops", "{:.1f}", HIGHER),
+    ("MFU", "mfu", "{:.1%}", HIGHER),
     ("Efficiency (tokens/J)", "tokens_per_joule", "{:.1f}", HIGHER),
     ("Steps/sec", "steps_per_sec", "{:.2f}", HIGHER),
     ("Peak power, instant (W)", "native_peak_power_w", "{:.0f}", NEUTRAL),

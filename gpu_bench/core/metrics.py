@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from gpu_bench.core import thermal
+from gpu_bench.core.peak import peak_tflops
 from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
 
@@ -280,13 +281,15 @@ def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
 
 
 def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
-                  trace: pd.DataFrame | None = None) -> dict[str, Any]:
+                  trace: pd.DataFrame | None = None,
+                  device: dict[str, Any] | None = None) -> dict[str, Any]:
     """Everything the summary table shows, as numbers.
 
     Optional readings (memory temperature, fan, PCIe) come back as None on
     hardware that does not report them, and so do the throughput figures when
     the summary predates them or the timed window never opened. The
-    transient figures need the native sampler's trace and are None without it.
+    transient figures need the native sampler's trace and are None without it,
+    and MFU needs the device info telemetry reads at start-up.
     """
     stats: dict[str, Any] = {
         'avg_temp_c': float(df['temp_gpu'].mean()),
@@ -308,6 +311,10 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
         'tokens_per_joule': None,
         'power_limited_pct': None,
         'thermal_limited_pct': None,
+        'peak_tflops': None,
+        'peak_basis': None,
+        'mfu': None,
+        'hfu': None,
     }
 
     # Over the measured steps when there were any, else over the whole run:
@@ -348,6 +355,17 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
         flops = flops_per_token(summary['params_b'],
                                 bool(summary.get('gradient_checkpointing')))
         stats['est_tflops'] = stats['tokens_per_sec'] * flops / 1e12
+        peak = peak_tflops(device, summary.get('sm_count'), summary.get('compute_dtype'))
+        if peak is not None:
+            # MFU counts the model's FLOPs only — the 4N of a LoRA step,
+            # never the recompute checkpointing adds — so it does not reward
+            # doing work twice. HFU counts what the hardware actually ran.
+            model_tflops = stats['tokens_per_sec'] * flops_per_token(
+                summary['params_b'], gradient_checkpointing=False) / 1e12
+            stats['peak_tflops'] = peak.tflops
+            stats['peak_basis'] = f"{peak.architecture}, {peak.unit}"
+            stats['mfu'] = model_tflops / peak.tflops
+            stats['hfu'] = stats['est_tflops'] / peak.tflops
 
     energy, source = energy_joules(window)
     if energy:

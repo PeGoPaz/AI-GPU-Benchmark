@@ -63,9 +63,10 @@ def thermal_verdict(stats: dict[str, Any]) -> str:
 
 
 def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
-                 trace: pd.DataFrame | None = None) -> list[tuple[str, str]]:
+                 trace: pd.DataFrame | None = None,
+                 device: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """The summary table as (metric, value) pairs, ready to display."""
-    stats = compute_stats(df, summary, trace)
+    stats = compute_stats(df, summary, trace, device)
 
     steps_label = f"{summary['total_steps']}"
     if summary.get('aborted'):
@@ -104,6 +105,12 @@ def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
         metrics.append(("Tokens/sec", f"{stats['tokens_per_sec']:,.0f}"))
     if stats['est_tflops'] is not None:
         metrics.append(("Compute (est. TFLOPS)", f"{stats['est_tflops']:.1f}"))
+    if stats['mfu'] is not None:
+        metrics.append(("MFU (model FLOPs / peak)",
+                        f"{stats['mfu'] * 100:.1f} % of {stats['peak_tflops']:.1f} TFLOPS "
+                        f"({stats['peak_basis']})"))
+        if summary.get('gradient_checkpointing'):
+            metrics.append(("HFU (with recompute)", f"{stats['hfu'] * 100:.1f} %"))
     if stats['energy_j'] is not None:
         metrics.append((f"Energy, timed (kJ, {stats['energy_source']})",
                         f"{stats['energy_j'] / 1000:.2f}"))
@@ -181,14 +188,15 @@ class Headline:
 
 
 def headline_cards(df: pd.DataFrame, summary: dict[str, Any],
-                   trace: pd.DataFrame | None = None) -> list[Headline]:
+                   trace: pd.DataFrame | None = None,
+                   device: dict[str, Any] | None = None) -> list[Headline]:
     """The run in five numbers: rate, compute, efficiency, peak power, peak heat.
 
     The full table still has everything; these are what people compare runs
     by. A figure the run cannot support — no timed window, no energy reading —
     falls back to the nearest one it can, rather than showing a dash.
     """
-    stats = compute_stats(df, summary, trace)
+    stats = compute_stats(df, summary, trace, device)
     cards = []
 
     if stats['tokens_per_sec'] is not None:
@@ -199,7 +207,9 @@ def headline_cards(df: pd.DataFrame, summary: dict[str, Any],
                               "no token count for this run"))
 
     if stats['est_tflops'] is not None:
-        cards.append(Headline("Compute", f"{stats['est_tflops']:.1f}", "TFLOPS", "estimated"))
+        caption = (f"estimated · MFU {stats['mfu']:.0%}" if stats['mfu'] is not None
+                   else "estimated")
+        cards.append(Headline("Compute", f"{stats['est_tflops']:.1f}", "TFLOPS", caption))
 
     if stats['tokens_per_joule'] is not None:
         cards.append(Headline("Efficiency", f"{stats['tokens_per_joule']:.0f}", "tokens/J",

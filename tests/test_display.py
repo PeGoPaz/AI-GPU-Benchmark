@@ -72,3 +72,17 @@ def test_energy_per_step_row_names_its_source(telemetry_sample):
     rows = dict(display.summary_rows(_df(telemetry_sample), summary))
 
     assert "Energy per Step p50 / p95 (J, counter)" in rows
+
+
+def test_mfu_row_and_caption_with_device_info(telemetry_sample):
+    summary = {**FULL, "compute_dtype": "bfloat16", "sm_count": 24,
+               "gradient_checkpointing": True}
+    device = {"name": "NVIDIA GeForce RTX 4060 Laptop GPU", "compute_capability": [8, 9],
+              "max_sm_clock_mhz": 2370}
+
+    rows = dict(display.summary_rows(_df(telemetry_sample), summary, device=device))
+    cards = display.headline_cards(_df(telemetry_sample), summary, device=device)
+
+    assert rows["MFU (model FLOPs / peak)"].endswith("of 29.1 TFLOPS (Ada Lovelace, 16-bit tensor)")
+    assert "HFU (with recompute)" in rows
+    assert cards[1].caption.startswith("estimated · MFU ")

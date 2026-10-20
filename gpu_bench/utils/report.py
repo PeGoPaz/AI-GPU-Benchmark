@@ -66,7 +66,7 @@ def build_report(df: pd.DataFrame, summary: dict[str, Any],
         "workload": {key: summary.get(key) for key in _WORKLOAD_KEYS},
         "results": {
             **{key: summary.get(key) for key in _RESULT_KEYS},
-            **compute_stats(df, summary, trace),
+            **compute_stats(df, summary, trace, device),
         },
         "power_sampler": sampler or {"active": False, "detail": "unknown"},
         "loss": {"steps": list(steps), "values": list(values)},

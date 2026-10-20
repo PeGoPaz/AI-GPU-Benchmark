@@ -957,13 +957,13 @@ class MainWindow(QMainWindow):
     def _render_summary(self, df: pd.DataFrame, summary: dict[str, Any]) -> None:
         """Headline cards, and the full table under Details."""
         trace = self.logger.power_trace()
-        headlines = headline_cards(df, summary, trace)
+        headlines = headline_cards(df, summary, trace, self._device_info)
         for card, headline in zip(self.result_cards, headlines + [None] * 5, strict=False):
             card.setVisible(headline is not None)
             if headline is not None:
                 card.set_headline(headline)
 
-        metrics = summary_rows(df, summary, trace)
+        metrics = summary_rows(df, summary, trace, self._device_info)
 
         self.summary_table.setRowCount(len(metrics))
         for row, (metric, value) in enumerate(metrics):

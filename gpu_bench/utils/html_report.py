@@ -105,7 +105,7 @@ def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any]
         f"<div class='card'><div class='label'>{_e(c.label)}</div>"
         f"<div><span class='value'>{_e(c.value)}</span><span class='unit'>{_e(c.unit)}</span></div>"
         f"<div class='caption'>{_e(c.caption)}</div></div>"
-        for c in headline_cards(df, summary, trace))
+        for c in headline_cards(df, summary, trace, gpu))
 
     telemetry_svg = figure_svg(build_report_figure(df, trace))
     loss = report.get("loss") or {}
@@ -152,7 +152,7 @@ def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any]
 {loss_panel}
 {steps_panel}
 <section class="tables">
-<div class="panel"><h2>Results</h2>{_table(summary_rows(df, summary, trace))}</div>
+<div class="panel"><h2>Results</h2>{_table(summary_rows(df, summary, trace, gpu))}</div>
 <div><div class="panel"><h2>Workload</h2>{_table(workload_rows)}</div>
 <div class="panel"><h2>Environment</h2>{_table(environment)}</div></div>
 </section>

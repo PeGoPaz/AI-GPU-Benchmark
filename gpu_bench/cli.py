@@ -286,7 +286,7 @@ class HeadlessRun(QObject):
             return
 
         trace = self.logger.power_trace()
-        rows = summary_rows(df, summary, trace)
+        rows = summary_rows(df, summary, trace, self._device)
         width = max(len(metric) for metric, _ in rows)
         self._print("\n=== Benchmark Summary ===")
         for metric, value in rows:

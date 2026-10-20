@@ -173,6 +173,9 @@ def read_device_info(handle: Handle, gpu_name: str) -> dict[str, Any]:
     """
     power_limit_mw = _try_read(pynvml.nvmlDeviceGetEnforcedPowerLimit, handle)
     memory = _try_read(pynvml.nvmlDeviceGetMemoryInfo, handle)
+    # The architecture and the top clock, for the card's peak throughput
+    # (gpu_bench.core.peak). A list, not a tuple, so it survives JSON as is.
+    capability = _try_read(pynvml.nvmlDeviceGetCudaComputeCapability, handle)
     return {
         "name": gpu_name,
         "driver_version": _decode(_try_read(pynvml.nvmlSystemGetDriverVersion)),
@@ -182,6 +185,9 @@ def read_device_info(handle: Handle, gpu_name: str) -> dict[str, Any]:
         "power_limit_w": power_limit_mw / 1000.0 if power_limit_mw else None,
         "pcie_gen_max": _try_read(pynvml.nvmlDeviceGetMaxPcieLinkGeneration, handle),
         "pcie_width_max": _try_read(pynvml.nvmlDeviceGetMaxPcieLinkWidth, handle),
+        "compute_capability": list(capability) if capability else None,
+        "max_sm_clock_mhz": _try_read(pynvml.nvmlDeviceGetMaxClockInfo, handle,
+                                      pynvml.NVML_CLOCK_SM),
     }
 
 

@@ -138,6 +138,8 @@ def _patch_nvml(monkeypatch, **overrides):
         "nvmlSystemGetDriverVersion": lambda: "580.82",
         "nvmlSystemGetCudaDriverVersion": lambda: 13000,
         "nvmlDeviceGetEnforcedPowerLimit": lambda h: 450_000,
+        "nvmlDeviceGetCudaComputeCapability": lambda h: (8, 9),
+        "nvmlDeviceGetMaxClockInfo": lambda h, c: 2790,
     }
     defaults.update(overrides)
     for name, fn in defaults.items():
@@ -284,6 +286,8 @@ def test_device_info_is_sent_once_at_startup(monkeypatch):
         "power_limit_w": 450.0,
         "pcie_gen_max": 4,
         "pcie_width_max": 16,
+        "compute_capability": [8, 9],
+        "max_sm_clock_mhz": 2790,
     }]
 
 
@@ -292,12 +296,14 @@ def test_device_info_tolerates_missing_queries(monkeypatch):
         raise Exception("NVML_ERROR_NOT_SUPPORTED")
 
     _patch_nvml(monkeypatch, nvmlSystemGetDriverVersion=unsupported,
-                nvmlDeviceGetEnforcedPowerLimit=unsupported)
+                nvmlDeviceGetEnforcedPowerLimit=unsupported,
+                nvmlDeviceGetCudaComputeCapability=unsupported)
     device = []
     _one_poll(telemetry.TelemetryWorker(interval_ms=1), device=device)
 
     assert device[0]["driver_version"] is None
     assert device[0]["power_limit_w"] is None
+    assert device[0]["compute_capability"] is None
 
 
 
