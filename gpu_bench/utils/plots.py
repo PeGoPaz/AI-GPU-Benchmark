@@ -12,6 +12,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
+from gpu_bench.core.series import PICK_LABELS
 from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
 TEMP_COLOR = '#ff4c4c'
@@ -217,6 +218,34 @@ def build_step_figure(durations: np.ndarray, energies: np.ndarray,
         draw_step_durations(fig.add_subplot(111), durations)
     fig.tight_layout()
     return fig
+
+
+def draw_sweep(ax: Axes, points: list[tuple[float, float]], front: list[int],
+               picks: dict[str, int], labels: list[str]) -> None:
+    """A sweep as tokens/s against tokens/J, with its Pareto front joined up.
+
+    Up and to the right is better on both counts, so the front is the
+    staircase along the top-right edge; everything below it is beaten by
+    something on it. The named picks are labelled.
+    """
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    others = [i for i in range(len(points)) if i not in front]
+    ax.scatter([xs[i] for i in others], [ys[i] for i in others], color='#9aa0a6',
+               label='Beaten on both counts', zorder=2)
+    ordered = sorted(front, key=lambda i: xs[i])
+    ax.plot([xs[i] for i in ordered], [ys[i] for i in ordered], color=POWER_COLOR,
+            marker='o', linewidth=1.5, label='Pareto front', zorder=3)
+    for name, i in picks.items():
+        ax.annotate(f"{PICK_LABELS[name]}\n{labels[i]}", (xs[i], ys[i]), textcoords='offset points',
+                    xytext=(8, 6), fontsize=8, color='#333333')
+    # Room for the labels: the picks sit on the top and right edges by definition.
+    ax.margins(x=0.15, y=0.2)
+    ax.set_xlabel('Tokens/sec')
+    ax.set_ylabel('Tokens/J')
+    ax.set_title('Speed against Efficiency')
+    ax.grid(True, alpha=0.2)
+    ax.legend(loc='lower left')
 
 
 def build_report_figure(df: pd.DataFrame, trace: pd.DataFrame | None = None) -> Figure:

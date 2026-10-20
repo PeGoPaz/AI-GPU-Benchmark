@@ -165,3 +165,18 @@ def test_step_figure_adds_the_energy_histogram_when_there_is_energy():
     assert len(alone.axes) == 1
     assert [ax.get_title() for ax in both.axes] == ["Step Duration", "Energy per Step"]
     assert "counter" in both.axes[1].get_xlabel()
+
+
+def test_sweep_chart_joins_the_front_left_to_right_and_labels_the_picks():
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    points = [(1400, 30), (1000, 40), (900, 35), (1300, 39)]
+
+    plots.draw_sweep(ax, points, front=[0, 1, 3],
+                     picks={"fastest": 0, "most_efficient": 1, "balanced": 3},
+                     labels=["b4", "b1", "b8", "b2"])
+
+    front_line = next(line for line in ax.get_lines() if line.get_label() == "Pareto front")
+    assert list(front_line.get_xdata()) == [1000, 1300, 1400]
+    assert sorted(t.get_text() for t in ax.texts) == ["balanced\nb2", "fastest\nb4",
+                                                      "most efficient\nb1"]

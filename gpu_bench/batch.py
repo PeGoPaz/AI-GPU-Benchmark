@@ -20,10 +20,12 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TextIO
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
+from gpu_bench import __version__
 from gpu_bench.core import series
 from gpu_bench.core.telemetry import read_gpu_temperature
 from gpu_bench.utils.logger import unique_stamp, write_json
@@ -256,10 +258,6 @@ def failure_reason(error: str | None) -> str:
     return "failed"
 
 
-_PICK_LABELS = {"fastest": "fastest", "most_efficient": "most efficient",
-                "balanced": "balanced"}
-
-
 def _mean(entry: dict[str, Any], key: str) -> float | None:
     metric = ((entry.get("record") or {}).get("metrics") or {}).get(key)
     return float(metric["mean"]) if metric else None
@@ -308,6 +306,8 @@ class Sweep(QObject):
         # tokens/J, and the configurations it recommends.
         self.front: list[int] = []
         self.picks: dict[str, int] = {}
+        self.path: str | None = None
+        self.html_path: str | None = None
         self._current: Series | None = None
         self._interrupted = False
 
@@ -378,10 +378,71 @@ class Sweep(QObject):
         self.front = [ranked[i] for i in series.pareto_front(points)]
         self.picks = {name: ranked[i] for name, i in series.picks(points).items()}
 
+    def record(self) -> dict[str, Any]:
+        """The sweep as one JSON document: what was varied, and how each one did.
+
+        Every configuration keeps its series' aggregates and the names of the
+        run reports behind them; `front` and `picks` index into
+        `configurations`. Written beside the runs, and read back by the HTML
+        page, so the page can always be rebuilt from it.
+        """
+        def settings(workload: dict[str, Any]) -> dict[str, Any]:
+            return {key: getattr(workload[key], "label", workload[key]) for key in self.keys}
+
+        first = next((r["record"] for r in self.results if r["record"]), None) or {}
+        return {
+            "schema_version": 1,
+            "kind": "sweep",
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "app_version": __version__,
+            "gpu": first.get("gpu") or {},
+            "workload": first.get("workload") or {},
+            "axes": {key: [getattr(v, "label", v) for v in values]
+                     for key, values in self.axes().items()},
+            "repeat": self.repeat,
+            "configurations": [
+                {"label": describe(r["workload"], self.keys),
+                 "settings": settings(r["workload"]),
+                 "status": r["status"],
+                 "metrics": (r["record"] or {}).get("metrics"),
+                 "dropped": (r["record"] or {}).get("dropped", []),
+                 "reports": r["files"]}
+                for r in self.results],
+            "skipped": [{"label": describe(w, self.keys), "settings": settings(w),
+                         "reason": reason} for w, reason in self.skipped],
+            "front": self.front,
+            "picks": self.picks,
+        }
+
+    def axes(self) -> dict[str, list[Any]]:
+        """The values each swept key took, in first-seen order."""
+        values: dict[str, list[Any]] = {key: [] for key in self.keys}
+        for workload in [*self.configs, *(w for w, _ in self.skipped)]:
+            for key in self.keys:
+                if workload[key] not in values[key]:
+                    values[key].append(workload[key])
+        return values
+
+    def _export(self) -> None:
+        from gpu_bench.utils.sweep_report import build_sweep_html
+
+        record = self.record()
+        try:
+            self.path = write_json(self.output_dir, "sweep", record)
+            self.html_path = self.path[:-len(".json")] + ".html"
+            with open(self.html_path, "w", encoding="utf-8") as f:
+                f.write(build_sweep_html(record))
+        except OSError as e:
+            self._print(f"Export failed: {e}")
+            return
+        self._print(f"\nExported: {self.path}\nExported: {self.html_path}")
+
     def _conclude(self) -> None:
         self._rank()
         self._print_table()
         self._print_picks()
+        if self.results:
+            self._export()
         if self._interrupted:
             code = EXIT_INTERRUPTED
         else:
@@ -412,18 +473,18 @@ class Sweep(QObject):
         """'front' for a configuration on the Pareto front, with any pick it is."""
         if index not in self.front:
             return ""
-        named = [_PICK_LABELS[name] for name, i in self.picks.items() if i == index]
+        named = [series.PICK_LABELS[name] for name, i in self.picks.items() if i == index]
         return " · ".join(["front", *named])
 
     def _print_picks(self) -> None:
         if not self.picks:
             return
         self._print("")
-        width = max(len(label) for label in _PICK_LABELS.values()) + 1
+        width = max(len(label) for label in series.PICK_LABELS.values()) + 1
         for name, index in self.picks.items():
             entry = self.results[index]
             speed = _mean(entry, "tokens_per_sec") or 0.0
             efficiency = _mean(entry, "tokens_per_joule") or 0.0
-            self._print(f"{_PICK_LABELS[name].capitalize() + ':':<{width}}  "
+            self._print(f"{series.PICK_LABELS[name].capitalize() + ':':<{width}}  "
                         f"{describe(entry['workload'], self.keys)} — "
                         f"{speed:,.0f} tokens/s at {efficiency:.1f} tokens/J")

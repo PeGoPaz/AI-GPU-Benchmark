@@ -123,6 +123,8 @@ Before anything runs, combinations whose weights alone would not fit the card's 
 
 Speed and efficiency pull against each other — the fastest setting is rarely the one that does the most work per joule — so there is usually no single winner, only a set of fair trades. The table marks that set: the **Pareto front**, the combinations nothing else beats on both tokens/sec and tokens/J at once; everything off it is a worse deal than something on it. Three of them are named underneath: the *fastest*, the *most efficient*, and the *balanced* one — the front point nearest the ideal that would be both, with each axis scaled to the range the sweep covered so that neither unit dominates.
 
+The sweep directory ends up holding every run's files, a `series_*.json` per combination when `--repeat` is above one, and the sweep itself as `sweep_<timestamp>.json` — the axes, each combination's aggregates and status, what was skipped and why, the front and the picks — plus `sweep_<timestamp>.html`: the trade-off as a chart of tokens/sec against tokens/J with the front drawn through it and the picks labelled, and the full table under it. Like the per-run page it is one self-contained file with the same stylesheet, built from the JSON alone.
+
 ---
 
 ## How It Works
@@ -230,6 +232,7 @@ gpu_bench/
     plots.py                   — chart panels shared by the window's tabs and the exported PNG
     report.py                  — the versioned JSON run report written on export
     html_report.py             — the same run as one self-contained HTML page
+    sweep_report.py            — a sweep as one page: the speed/efficiency chart with its Pareto front, and the table
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU

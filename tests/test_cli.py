@@ -560,7 +560,7 @@ def test_a_sweep_where_nothing_finishes_fails(qapp, tmp_path, telemetry_sample):
     assert codes == [1]
 
 
-def test_sweep_table_marks_the_front_and_names_the_picks():
+def test_sweep_table_marks_the_front_and_names_the_picks(tmp_path):
     from gpu_bench.batch import Sweep
 
     def entry(batch, speed, efficiency):
@@ -572,7 +572,7 @@ def test_sweep_table_marks_the_front_and_names_the_picks():
 
     out = io.StringIO()
     sweep = Sweep([{"batch_size": b} for b in (1, 2, 4, 8)], ["batch_size"],
-                  lambda w, d: None, out=out)
+                  lambda w, d: None, output_dir=str(tmp_path), out=out)
     sweep.results = [entry(1, 1000, 40), entry(2, 1300, 39), entry(4, 1400, 30),
                      {"workload": {"batch_size": 8}, "status": "out of memory",
                       "record": None, "files": []}]
@@ -584,3 +584,38 @@ def test_sweep_table_marks_the_front_and_names_the_picks():
     assert "front · balanced" in text
     assert sweep.front == [0, 1, 2]
     assert "Balanced:        batch 2 — 1,300 tokens/s at 39.0 tokens/J" in text
+
+
+
+def test_sweep_writes_its_record_and_page_beside_the_runs(qapp, tmp_path, telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [1, 8, 2]}, oom_batch=8)
+
+    record = json.loads(open(sweep.path, encoding="utf-8").read())
+    assert sweep.path.startswith(sweep.output_dir)
+    assert record["kind"] == "sweep"
+    assert record["axes"] == {"batch_size": [1, 8, 2]}
+    assert [c["status"] for c in record["configurations"]] == ["ok", "out of memory", "ok"]
+    assert record["configurations"][0]["settings"] == {"batch_size": 1}
+    assert len(record["configurations"][0]["reports"]) == 1
+    assert record["front"] and set(record["picks"]) == {"fastest", "most_efficient",
+                                                         "balanced"}
+    page = open(sweep.html_path, encoding="utf-8").read()
+    assert "<svg" in page and "Pareto front" in page
+    assert "out of memory" in page
+
+
+def test_sweep_record_names_models_and_precisions_by_label(tmp_path):
+    from gpu_bench.batch import Sweep
+
+    bf16, int4 = (cli.resolve(trainer_module.PRECISIONS, p, "precision")
+                  for p in ("bf16", "int4"))
+    sweep = Sweep([{"precision": bf16}], ["precision"], lambda w, d: None,
+                  output_dir=str(tmp_path), skipped=[({"precision": int4}, "too big")])
+
+    record = sweep.record()
+
+    assert record["axes"] == {"precision": ["BF16", "INT4 (NF4)"]}
+    assert record["skipped"] == [{"label": "INT4 (NF4)", "settings": {"precision": "INT4 (NF4)"},
+                                  "reason": "too big"}]
+    json.dumps(record)                                  # plain JSON throughout

@@ -120,6 +120,11 @@ def format_aggregate(agg: dict[str, Any], fmt: str) -> str:
     return f"{value}{spread}  ({fmt.format(agg['min'])} – {fmt.format(agg['max'])})"
 
 
+# How the picks read, wherever they are shown.
+PICK_LABELS = {"fastest": "fastest", "most_efficient": "most efficient",
+               "balanced": "balanced"}
+
+
 def pareto_front(points: Sequence[tuple[float, float]]) -> list[int]:
     """Indices of the points no other point beats on both axes, both maximised.
 

@@ -18,7 +18,8 @@ from gpu_bench.core.metrics import step_durations, step_energy
 from gpu_bench.utils.display import headline_cards, summary_rows
 from gpu_bench.utils.plots import build_report_figure, build_step_figure, draw_loss
 
-_CSS = """
+# Shared with the sweep page (gpu_bench.utils.sweep_report), so the two match.
+CSS = """
 :root {
   --bg: #f6f7f9; --surface: #ffffff; --border: #dde1e6; --text: #1a1d21;
   --muted: #69707a; --accent: #3a6ea5;
@@ -55,6 +56,9 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 td { padding: 6px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
 td:first-child { color: var(--muted); padding-right: 16px; }
+th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 700;
+     padding: 6px 4px; border-bottom: 1px solid var(--border); }
+tr.front td { color: var(--text); font-weight: 600; }
 footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
 """
 
@@ -138,7 +142,7 @@ def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any]
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_e(gpu_name)} — {_e(model)} — AI GPU Benchmark</title>
-<style>{_CSS}</style>
+<style>{CSS}</style>
 </head>
 <body>
 <main>
