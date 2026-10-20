@@ -1,0 +1,12 @@
+# Scrapes a gpu-bench run started on the host with --metrics-port 9400,
+# reached from the container through host.docker.internal (which
+# docker-compose.yml maps on Linux too).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: gpu-bench
+    static_configs:
+      - targets:
+          - host.docker.internal:9400

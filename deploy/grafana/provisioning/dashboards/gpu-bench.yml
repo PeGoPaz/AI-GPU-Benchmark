@@ -1,0 +1,10 @@
+# Loads every dashboard JSON mounted at /var/lib/grafana/dashboards.
+apiVersion: 1
+
+providers:
+  - name: gpu-bench
+    folder: AI GPU Benchmark
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
