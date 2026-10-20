@@ -290,6 +290,7 @@ tests/                         — pytest suite; the ML stack and NVML are stubb
 .github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
 .github/workflows/image.yml    — builds and smoke-tests the container image; pushes it to GHCR when the release calls it
 .github/workflows/wheels.yml   — prebuilt native wheels for Linux and Windows with cibuildwheel, each one tested
+.github/workflows/release.yml  — a version tag publishes a GitHub release: app wheel and sdist, native wheels, the image on GHCR
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 mypy.ini                       — type-check settings (strict, the whole package)

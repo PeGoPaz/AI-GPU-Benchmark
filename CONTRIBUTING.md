@@ -46,6 +46,15 @@ clang-format -i $(git ls-files 'native/*.cpp' 'native/*.hpp')
 - Tests stay hardware-free: mock the GPU rather than requiring one.
 - One logical change per PR, all three checks green, and update `README.md` if users would notice the difference.
 
+## Releasing
+
+The version lives in `gpu_bench/__init__.py` and nowhere else; between releases it carries a `.dev0` suffix. To release:
+
+1. Set the version (`0.2.0`), and move the *Unreleased* entries in `CHANGELOG.md` under a `## [0.2.0] - <date>` heading.
+2. Run the **Release** workflow by hand from the Actions tab: a dry run that builds the app, the native wheels and the image, and publishes nothing.
+3. Commit, then `git tag v0.2.0 && git push origin v0.2.0`. The tag must match the version, and the changelog must have its section — the workflow refuses otherwise — and that section becomes the release notes.
+4. Bump the version to the next `.dev0`.
+
 ## What to work on
 
 Four blocks, roughly ordered — later ones build on earlier ones, and each is a sensible chunk of work by itself. Open an issue before starting anything large so we don't duplicate effort.
