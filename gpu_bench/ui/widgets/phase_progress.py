@@ -11,7 +11,7 @@ from PyQt6.QtCore import QRectF, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
-from app.ui.style import LIGHT, Palette
+from gpu_bench.ui.style import LIGHT, Palette
 
 IDLE, LOADING, WARMUP, MEASURING, DONE = "idle", "loading", "warm-up", "measuring", "done"
 

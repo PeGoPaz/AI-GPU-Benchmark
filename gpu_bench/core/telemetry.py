@@ -3,7 +3,7 @@ import time
 import pynvml
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.core.power_sampler import describe_status, open_sampler
+from gpu_bench.core.power_sampler import describe_status, open_sampler
 
 # nvmlDeviceGetTemperature takes sensor 0 (GPU core) and, since NVML 13,
 # sensor 1 (NVML_TEMPERATURE_GPU_MAX). The junction/hotspot sensor is NOT

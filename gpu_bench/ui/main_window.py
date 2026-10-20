@@ -29,8 +29,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.telemetry import TelemetryWorker
-from app.core.trainer import (
+from gpu_bench.core.telemetry import TelemetryWorker
+from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
     MODELS,
     PRECISIONS,
@@ -41,11 +41,11 @@ from app.core.trainer import (
     estimate_weights_gib,
     fits_in_vram,
 )
-from app.ui import icons, readings
-from app.ui.about import AboutDialog, about_rows, app_icon
-from app.ui.compare_window import CompareWindow, load_runs
-from app.ui.live_charts import LiveCharts
-from app.ui.style import (
+from gpu_bench.ui import icons, readings
+from gpu_bench.ui.about import AboutDialog, about_rows, app_icon
+from gpu_bench.ui.compare_window import CompareWindow, load_runs
+from gpu_bench.ui.live_charts import LiveCharts
+from gpu_bench.ui.style import (
     LIGHT,
     START_GREEN,
     STOP_RED,
@@ -53,16 +53,16 @@ from app.ui.style import (
     build_qpalette,
     build_stylesheet,
 )
-from app.ui.widgets import header
-from app.ui.widgets.empty_state import EmptyState
-from app.ui.widgets.gauge import ArcGauge
-from app.ui.widgets.header import HeaderBar
-from app.ui.widgets.phase_progress import PhaseProgressBar
-from app.ui.widgets.result_card import ResultCard
-from app.ui.widgets.tile import MetricTile
-from app.utils.display import RateTracker, format_progress, headline_cards, summary_rows
-from app.utils.logger import BenchmarkLogger
-from app.utils.report import build_report
+from gpu_bench.ui.widgets import header
+from gpu_bench.ui.widgets.empty_state import EmptyState
+from gpu_bench.ui.widgets.gauge import ArcGauge
+from gpu_bench.ui.widgets.header import HeaderBar
+from gpu_bench.ui.widgets.phase_progress import PhaseProgressBar
+from gpu_bench.ui.widgets.result_card import ResultCard
+from gpu_bench.ui.widgets.tile import MetricTile
+from gpu_bench.utils.display import RateTracker, format_progress, headline_cards, summary_rows
+from gpu_bench.utils.logger import BenchmarkLogger
+from gpu_bench.utils.report import build_report
 
 SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
 SYSTEM = "system"

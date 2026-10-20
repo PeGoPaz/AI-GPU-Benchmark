@@ -11,7 +11,7 @@ from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
-from app.ui.style import LIGHT, Palette
+from gpu_bench.ui.style import LIGHT, Palette
 
 # Telemetry arrives every 250 ms: 240 points is one minute.
 HISTORY_POINTS = 240

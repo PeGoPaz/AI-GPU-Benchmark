@@ -2,7 +2,7 @@
 import pandas as pd
 from matplotlib.figure import Figure
 
-from app.utils import plots
+from gpu_bench.utils import plots
 
 
 def _df(sample, n=5, **overrides):
@@ -56,7 +56,7 @@ def test_report_figure_stacks_both_panels(telemetry_sample):
 
 
 def test_throttle_spans_cover_each_flagged_stretch(telemetry_sample):
-    from app.core.telemetry import POWER_LIMIT_BITS, THROTTLE_SW_POWER_CAP
+    from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THROTTLE_SW_POWER_CAP
 
     df = _df(telemetry_sample, n=6)
     df["throttle_reasons"] = [0, THROTTLE_SW_POWER_CAP, THROTTLE_SW_POWER_CAP, 0,
@@ -66,7 +66,7 @@ def test_throttle_spans_cover_each_flagged_stretch(telemetry_sample):
 
 
 def test_power_limited_stretches_are_shaded_once_in_the_legend(telemetry_sample):
-    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP
 
     df = _df(telemetry_sample, n=6)
     df["throttle_reasons"] = [0, THROTTLE_SW_POWER_CAP, 0, THROTTLE_SW_POWER_CAP, 0, 0]

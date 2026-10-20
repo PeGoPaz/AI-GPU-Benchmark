@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from app.core import metrics
+from gpu_bench.core import metrics
 
 
 def _df(sample, n=9, **overrides):
@@ -109,7 +109,7 @@ def test_summary_without_token_counts_still_computes_thermals(telemetry_sample):
 
 
 def test_share_of_time_power_and_thermal_limited(telemetry_sample):
-    from app.core import telemetry
+    from gpu_bench.core import telemetry
 
     df = _df(telemetry_sample, n=4)
     df["throttle_reasons"] = [0, telemetry.THROTTLE_SW_POWER_CAP,

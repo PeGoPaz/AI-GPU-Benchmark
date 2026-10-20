@@ -6,7 +6,7 @@ and the tile widgets only have to display what they are given.
 """
 from dataclasses import dataclass
 
-from app.core.telemetry import decode_throttle_reasons
+from gpu_bench.core.telemetry import decode_throttle_reasons
 
 NORMAL, WARN, CRIT = "normal", "warn", "crit"
 

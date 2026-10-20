@@ -6,9 +6,9 @@ and the colours in style.py, and this widget knows neither.
 """
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from app.ui.readings import CRIT, NORMAL, WARN, Reading
-from app.ui.style import LIGHT, Palette
-from app.ui.widgets.sparkline import Sparkline
+from gpu_bench.ui.readings import CRIT, NORMAL, WARN, Reading
+from gpu_bench.ui.style import LIGHT, Palette
+from gpu_bench.ui.widgets.sparkline import Sparkline
 
 
 class MetricTile(QFrame):

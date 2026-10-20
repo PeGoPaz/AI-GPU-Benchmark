@@ -23,4 +23,4 @@ ignore = [
 "tests/*" = ["E402", "B011"]
 
 [lint.isort]
-known-first-party = ["app"]
+known-first-party = ["gpu_bench"]

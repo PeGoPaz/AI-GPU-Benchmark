@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.core.metrics import compute_stats
+from gpu_bench.core.metrics import compute_stats
 
 
 class RateTracker:

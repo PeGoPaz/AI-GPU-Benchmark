@@ -5,9 +5,9 @@ throughput and efficiency stand out from the details table beneath them.
 """
 from PyQt6.QtWidgets import QWidget
 
-from app.ui.readings import Reading
-from app.ui.widgets.tile import MetricTile
-from app.utils.display import Headline
+from gpu_bench.ui.readings import Reading
+from gpu_bench.ui.widgets.tile import MetricTile
+from gpu_bench.utils.display import Headline
 
 
 class ResultCard(MetricTile):

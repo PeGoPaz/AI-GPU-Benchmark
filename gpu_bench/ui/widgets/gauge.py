@@ -11,8 +11,8 @@ from PyQt6.QtCore import QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
-from app.ui.readings import CRIT, NORMAL, WARN
-from app.ui.style import LIGHT, Palette
+from gpu_bench.ui.readings import CRIT, NORMAL, WARN
+from gpu_bench.ui.style import LIGHT, Palette
 
 START_DEG = 225     # 7:30 on a clock face
 SPAN_DEG = -270     # clockwise round to 4:30

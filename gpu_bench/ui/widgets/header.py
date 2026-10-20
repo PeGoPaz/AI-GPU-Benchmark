@@ -7,8 +7,8 @@ the window wants to know.
 """
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from app.ui.style import LIGHT, Palette
-from app.ui.widgets.chip import Chip
+from gpu_bench.ui.style import LIGHT, Palette
+from gpu_bench.ui.widgets.chip import Chip
 
 IDLE = "Idle"
 LOADING = "Loading"

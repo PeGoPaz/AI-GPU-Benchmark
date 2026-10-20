@@ -2,7 +2,7 @@
 import json
 import os
 
-from app.utils.logger import BenchmarkLogger
+from gpu_bench.utils.logger import BenchmarkLogger
 
 
 def _filled(sample, n=5):
@@ -161,7 +161,7 @@ def test_export_writes_the_trace_beside_the_telemetry(telemetry_sample, tmp_path
 
 
 def test_export_with_a_summary_writes_the_html_page(telemetry_sample, tmp_path):
-    from app.utils import report as report_module
+    from gpu_bench.utils import report as report_module
 
     df = _filled(telemetry_sample).stop()
     summary = {"total_steps": 10, "requested_steps": 10, "aborted": False,

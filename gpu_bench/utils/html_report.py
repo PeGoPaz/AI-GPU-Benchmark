@@ -11,8 +11,8 @@ import io
 
 from matplotlib.figure import Figure
 
-from app.utils.display import headline_cards, summary_rows
-from app.utils.plots import build_report_figure, draw_loss
+from gpu_bench.utils.display import headline_cards, summary_rows
+from gpu_bench.utils.plots import build_report_figure, draw_loss
 
 _CSS = """
 :root {

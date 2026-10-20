@@ -7,8 +7,8 @@ from unittest import mock
 
 import pytest
 
-import app.core.trainer as trainer_module
-from app.core.trainer import ProgressCallbackLogic, TrainerWorker
+import gpu_bench.core.trainer as trainer_module
+from gpu_bench.core.trainer import ProgressCallbackLogic, TrainerWorker
 
 
 class _FakeWorker:
@@ -632,7 +632,7 @@ def test_registries_import_without_the_ml_stack():
     """The window and the CLI import this module for its presets; paying
     for torch there cost seconds at every start-up."""
     result = _python(
-        "import sys, app.core.trainer, app.cli\n"
+        "import sys, gpu_bench.core.trainer, gpu_bench.cli\n"
         "print(sorted(m for m in ('torch', 'transformers', 'peft', 'datasets')"
         " if m in sys.modules))")
 

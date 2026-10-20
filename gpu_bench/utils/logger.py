@@ -6,7 +6,7 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 
-from app.utils.plots import build_report_figure
+from gpu_bench.utils.plots import build_report_figure
 
 
 class ExportPaths(NamedTuple):
@@ -89,13 +89,13 @@ class BenchmarkLogger:
                summary: dict | None = None) -> ExportPaths:
         """Writes the collected telemetry to CSV and generates a plot PNG.
 
-        With a report (see app.utils.report), also writes it as JSON beside
+        With a report (see gpu_bench.utils.report), also writes it as JSON beside
         them, pointing at the other files. A run that failed has no summary
         to report, so its telemetry is still exportable without one. With the
         native sampler's trace, that goes into a CSV of its own — at 500 Hz
         it has thousands of rows for every one of the telemetry CSV's. With
         the run's summary as well, the report is also written as a
-        self-contained HTML page (app.utils.html_report).
+        self-contained HTML page (gpu_bench.utils.html_report).
         """
         os.makedirs(output_dir, exist_ok=True)
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -125,7 +125,7 @@ class BenchmarkLogger:
             if html_path is not None and summary is not None:
                 # Imported here: matplotlib's SVG backend and the display
                 # helpers are only needed when there is a page to write.
-                from app.utils.html_report import build_html
+                from gpu_bench.utils.html_report import build_html
                 with open(html_path, "w", encoding="utf-8") as f:
                     f.write(build_html(report, df, summary, trace))
 

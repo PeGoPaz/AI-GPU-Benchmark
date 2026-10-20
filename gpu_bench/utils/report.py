@@ -11,7 +11,7 @@ import importlib.metadata
 import platform
 from datetime import datetime, timezone
 
-from app.core.metrics import compute_stats
+from gpu_bench.core.metrics import compute_stats
 
 REPORT_SCHEMA_VERSION = 1
 

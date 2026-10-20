@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.style import LIGHT, Palette
+from gpu_bench.ui.style import LIGHT, Palette
 
 # One colour per run, distinct in both themes.
 RUN_COLORS = ("#4c72ff", "#ff8c00", "#2e8b57", "#d64545", "#a06bff", "#00a6c8")

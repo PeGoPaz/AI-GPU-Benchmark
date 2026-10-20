@@ -6,7 +6,7 @@ pytestmark = pytest.mark.ui
 
 @pytest.fixture
 def phase_bar(qapp):
-    from app.ui.widgets.phase_progress import PhaseProgressBar
+    from gpu_bench.ui.widgets.phase_progress import PhaseProgressBar
     bar = PhaseProgressBar()
     bar.resize(400, 28)
     yield bar
@@ -60,7 +60,7 @@ def test_no_warmup_goes_straight_to_measuring(phase_bar):
 def test_warmup_and_measured_segments_are_drawn_in_their_own_colours(phase_bar):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     phase_bar.start(warmup_steps=50, measured_steps=50)
     phase_bar.set_step(100)
@@ -72,7 +72,7 @@ def test_warmup_and_measured_segments_are_drawn_in_their_own_colours(phase_bar):
 def test_theme_switch_recolours_the_bar(phase_bar):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import DARK
+    from gpu_bench.ui.style import DARK
 
     phase_bar.start(warmup_steps=0, measured_steps=10)
     phase_bar.set_step(10)
@@ -87,12 +87,12 @@ def test_theme_switch_recolours_the_bar(phase_bar):
 
 @pytest.fixture
 def header_bar(qapp):
-    from app.ui.widgets.header import HeaderBar
+    from gpu_bench.ui.widgets.header import HeaderBar
     return HeaderBar()
 
 
 def test_device_details_skip_what_the_driver_did_not_say():
-    from app.ui.widgets.header import device_details
+    from gpu_bench.ui.widgets.header import device_details
 
     full = {"vram_total_mb": 8188.0, "driver_version": "580.82",
             "cuda_driver_version": "13.0", "power_limit_w": 115.0,
@@ -110,8 +110,8 @@ def test_header_shows_the_card_it_was_told_about(header_bar):
 
 
 def test_status_chip_colour_follows_the_state(header_bar):
-    from app.ui.style import LIGHT
-    from app.ui.widgets import header
+    from gpu_bench.ui.style import LIGHT
+    from gpu_bench.ui.widgets import header
 
     header_bar.set_status(header.MEASURING)
     assert header_bar.status_chip.text() == "Measuring"
@@ -132,7 +132,7 @@ def test_sampler_chip_appears_once_the_mode_is_known(header_bar):
 
 
 def test_chip_grows_with_its_text(qapp):
-    from app.ui.widgets.chip import Chip
+    from gpu_bench.ui.widgets.chip import Chip
 
     short, long = Chip("Idle"), Chip("Measuring transients")
 
@@ -144,7 +144,7 @@ def test_chip_grows_with_its_text(qapp):
 
 @pytest.fixture
 def gauge(qapp):
-    from app.ui.widgets.gauge import ArcGauge
+    from gpu_bench.ui.widgets.gauge import ArcGauge
     g = ArcGauge("Temperature", "°C", maximum=100)
     g.resize(140, 140)
     return g
@@ -153,7 +153,7 @@ def gauge(qapp):
 @pytest.mark.parametrize("value, expected", [(0.4, 0.5), (3, 5), (7, 10), (120, 200),
                                              (230, 250), (0, 1)])
 def test_scales_round_up_to_readable_numbers(value, expected):
-    from app.ui.widgets.gauge import nice_ceiling
+    from gpu_bench.ui.widgets.gauge import nice_ceiling
 
     assert nice_ceiling(value) == expected
 
@@ -170,7 +170,7 @@ def test_fraction_is_clamped_to_the_scale(gauge):
 
 
 def test_unscaled_gauge_grows_to_fit_and_never_shrinks(qapp):
-    from app.ui.widgets.gauge import ArcGauge
+    from gpu_bench.ui.widgets.gauge import ArcGauge
     g = ArcGauge("Power", "W")
 
     g.set_value(180, "180")
@@ -189,7 +189,7 @@ def _top_of_arc(gauge):
 def test_arc_fills_clockwise_from_the_start(gauge):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     gauge.set_value(40, "40")
     assert _top_of_arc(gauge) == QColor(LIGHT.track)
@@ -201,7 +201,7 @@ def test_arc_fills_clockwise_from_the_start(gauge):
 def test_arc_takes_the_state_colour(gauge):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     gauge.set_value(95, "95", state="crit")
 
@@ -213,7 +213,7 @@ def test_arc_takes_the_state_colour(gauge):
 
 @pytest.fixture
 def sparkline(qapp):
-    from app.ui.widgets.sparkline import Sparkline
+    from gpu_bench.ui.widgets.sparkline import Sparkline
     line = Sparkline()
     line.resize(200, 24)
     return line
@@ -227,7 +227,7 @@ def test_missing_readings_are_skipped_not_drawn_as_zero(sparkline):
 
 
 def test_history_is_bounded_to_a_minute(sparkline):
-    from app.ui.widgets.sparkline import HISTORY_POINTS
+    from gpu_bench.ui.widgets.sparkline import HISTORY_POINTS
 
     for i in range(1000):
         sparkline.append(i)
@@ -246,7 +246,7 @@ def test_flat_history_paints_without_dividing_by_zero(sparkline):
 def test_newest_point_sits_at_the_right_edge(sparkline):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     for i in range(10):
         sparkline.append(i)
@@ -276,7 +276,7 @@ def test_range_label_gets_the_room_it_needs(sparkline):
 def test_every_glyph_renders_in_the_requested_colour(qapp):
     from PyQt6.QtGui import QColor
 
-    from app.ui import icons
+    from gpu_bench.ui import icons
 
     for name in icons.GLYPHS:
         image = icons.icon(name, "#ff0000").pixmap(24, 24).toImage()
@@ -288,14 +288,14 @@ def test_every_glyph_renders_in_the_requested_colour(qapp):
 # --- app icon & about ----------------------------------------------------------------
 
 def test_app_icon_renders(qapp):
-    from app.ui.about import ICON_PATH, app_icon
+    from gpu_bench.ui.about import ICON_PATH, app_icon
 
     assert ICON_PATH.is_file()
     assert not app_icon().pixmap(64, 64).toImage().isNull()
 
 
 def test_about_text_lines_up_its_columns():
-    from app.ui.about import about_text
+    from gpu_bench.ui.about import about_text
 
     text = about_text([("Python", "3.13"), ("Native module", "not built")])
 
@@ -305,7 +305,7 @@ def test_about_text_lines_up_its_columns():
 def test_native_status_without_the_module(monkeypatch):
     import sys
 
-    from app.ui import about
+    from gpu_bench.ui import about
     monkeypatch.setitem(sys.modules, "nvml_sampler", None)
 
     assert about.native_module_status().startswith("not built")

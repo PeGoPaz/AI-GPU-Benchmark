@@ -11,7 +11,7 @@ from unittest import mock
 
 import pynvml
 
-from app.core import telemetry
+from gpu_bench.core import telemetry
 
 MEM = telemetry._FIELD_MEMORY_TEMP
 TLIM = telemetry._FIELD_GPU_TLIMIT

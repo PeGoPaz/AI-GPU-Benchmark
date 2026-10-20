@@ -4,8 +4,8 @@ import re
 import numpy as np
 import pandas as pd
 
-from app.utils import report as report_module
-from app.utils.html_report import build_html, figure_svg
+from gpu_bench.utils import report as report_module
+from gpu_bench.utils.html_report import build_html, figure_svg
 
 
 def _df(sample, n=9):

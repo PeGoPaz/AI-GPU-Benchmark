@@ -5,8 +5,8 @@ import json
 import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from app import cli
-from app.core import trainer as trainer_module
+from gpu_bench import cli
+from gpu_bench.core import trainer as trainer_module
 
 
 class FakeTelemetry(QObject):

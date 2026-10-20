@@ -62,7 +62,7 @@ def window(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(pynvml, "nvmlInit",
                         lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
 
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.main_window import MainWindow
     win = MainWindow(settings=_scratch_settings(tmp_path))
     yield win
     win.telemetry.stop()
@@ -139,7 +139,7 @@ def test_export_is_read_only(window, telemetry_sample, tmp_path, monkeypatch):
 @pytest.fixture
 def started_run(window, monkeypatch):
     """A window mid-benchmark, with the trainer thread stubbed out."""
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
     window.start_benchmark()
     assert not window.btn_start.isEnabled()
@@ -263,7 +263,7 @@ def _drawn(window, *names):
 
 def _util_plot_labels(window):
     """Series drawn on the utilization panel — the clock sits on the twin."""
-    from app.ui.live_charts import CLOCK, FAN, UTIL
+    from gpu_bench.ui.live_charts import CLOCK, FAN, UTIL
     return _drawn(window, UTIL, FAN, CLOCK)
 
 
@@ -297,7 +297,7 @@ def test_percentages_and_clock_use_separate_axes(window, telemetry_sample):
     curve onto the zero line, which made the fan and utilization unreadable."""
     _finish_run(window, telemetry_sample)
 
-    from app.ui.live_charts import CLOCK, UTIL
+    from gpu_bench.ui.live_charts import CLOCK, UTIL
 
     charts = window.charts
     assert charts.util_plot.vb.viewRange()[1] == pytest.approx([0, 105])
@@ -307,7 +307,7 @@ def test_percentages_and_clock_use_separate_axes(window, telemetry_sample):
 
 def test_workload_settings_reach_the_trainer(window, monkeypatch):
     """The run used to be hardcoded to 150 steps of TinyLlama at batch 4."""
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
 
     window.spin_steps.setValue(300)
@@ -370,8 +370,8 @@ def test_chart_tabs(window):
 def test_window_and_export_draw_the_same_series(window, telemetry_sample):
     """The tabs and the PNG used to be two hand-maintained copies of the same
     charts, and every change to one had to be repeated in the other."""
-    from app.ui.live_charts import CLOCK, FAN, POWER, POWER_INSTANT, TEMP, UTIL
-    from app.utils.plots import build_report_figure
+    from gpu_bench.ui.live_charts import CLOCK, FAN, POWER, POWER_INSTANT, TEMP, UTIL
+    from gpu_bench.utils.plots import build_report_figure
 
     _finish_run(window, telemetry_sample)
     on_screen = sorted(_drawn(window, TEMP, POWER, POWER_INSTANT, UTIL, FAN, CLOCK))
@@ -419,7 +419,7 @@ def test_fit_hint_warns_when_the_model_will_not_fit(window, telemetry_sample):
 def test_misfit_is_a_warning_not_a_lock(window, telemetry_sample, monkeypatch):
     """The estimate covers weights only, so Start stays usable — but the
     console says up front why the run is likely to die."""
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
     window.update_telemetry_ui(telemetry_sample(0, vram_total_mb=8192))
     _select(window.cmb_model, "Qwen2.5 7B")
@@ -466,7 +466,7 @@ def test_picking_custom_keeps_the_current_values(window):
 
 
 def test_preset_reaches_the_trainer(window, monkeypatch, telemetry_sample):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
     window.update_telemetry_ui(telemetry_sample(0, vram_total_mb=8192))
     _select(window.cmb_preset, "Stress")
@@ -503,7 +503,7 @@ def test_summary_reports_tokens_compute_and_energy(window, telemetry_sample):
 
 
 def test_throttle_label_names_the_reason(window, telemetry_sample):
-    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP
 
     window.update_telemetry_ui(telemetry_sample(0, throttle_reasons=THROTTLE_SW_POWER_CAP))
     assert window.tiles["throttle"].value_text() == "Power cap"
@@ -521,7 +521,7 @@ def test_throttle_label_without_driver_support(window, telemetry_sample):
 
 
 def test_summary_reports_time_spent_throttled(window, telemetry_sample):
-    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP
 
     window.logger.start()
     for i in range(4):
@@ -538,7 +538,7 @@ def test_summary_reports_time_spent_throttled(window, telemetry_sample):
 
 
 def test_progress_line_shows_rate_and_time_left():
-    from app.utils.display import format_progress
+    from gpu_bench.utils.display import format_progress
 
     assert format_progress(10, 310, None) == "Step 10 / 310"
     assert format_progress(10, 310, 2.0) == "Step 10 / 310 · 2.00 steps/s · ETA 2:30"
@@ -559,7 +559,7 @@ def test_charts_are_visible_and_live_during_the_run(started_run, telemetry_sampl
     started_run._refresh_live_charts()
 
     assert _util_plot_labels(started_run)
-    from app.ui.live_charts import LOSS
+    from gpu_bench.ui.live_charts import LOSS
     assert list(started_run.charts.curves[LOSS].getData()[1]) == [3.2, 3.0]
 
 
@@ -623,7 +623,7 @@ def test_failed_run_clears_the_phase_bar(started_run):
 
 def _reopen(window, tmp_path):
     """Closes the window and opens a fresh one on the same settings file."""
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.main_window import MainWindow
 
     window.close()
     reopened = MainWindow(settings=_scratch_settings(tmp_path))
@@ -634,7 +634,7 @@ def _reopen(window, tmp_path):
 def test_dark_theme_recolours_window_and_charts(window, telemetry_sample):
     from PyQt6.QtGui import QPalette
 
-    from app.ui.style import DARK
+    from gpu_bench.ui.style import DARK
 
     _finish_run(window, telemetry_sample)
     window.set_theme_choice("dark")
@@ -652,7 +652,7 @@ def test_dark_theme_recolours_window_and_charts(window, telemetry_sample):
 def test_themed_charts_keep_their_series_colours(window, telemetry_sample):
     """Temperature, power and clock axes are coloured to match their curves;
     the theme must only change the labels left at matplotlib's default."""
-    from app.utils.plots import CLOCK_COLOR
+    from gpu_bench.utils.plots import CLOCK_COLOR
 
     _finish_run(window, telemetry_sample)
     window.set_theme_choice("dark")
@@ -674,7 +674,7 @@ def test_theme_is_remembered(window, tmp_path):
 
 
 def test_workload_is_remembered(window, tmp_path, monkeypatch):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
     _select(window.cmb_preset, "Extended")
     window.spin_warmup.setValue(25)
@@ -705,7 +705,7 @@ def test_stale_settings_fall_back_to_the_default(tmp_path, qapp, monkeypatch):
     stop the app from starting."""
     import pynvml
 
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.main_window import MainWindow
     monkeypatch.setattr(pynvml, "nvmlInit",
                         lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
     settings = _scratch_settings(tmp_path)
@@ -817,7 +817,7 @@ def test_summary_shows_transients_when_the_trace_exists(window, telemetry_sample
     rows = _summary_rows(window)
     assert rows["Peak Power, instant (W)"] == "330.0"
     assert rows["Native Sampling (Hz)"].startswith("500, ")
-    from app.ui.live_charts import POWER_INSTANT
+    from gpu_bench.ui.live_charts import POWER_INSTANT
     assert _drawn(window, POWER_INSTANT) == [POWER_INSTANT]
 
 
@@ -830,7 +830,7 @@ def test_summary_without_a_trace_has_no_transient_rows(window, telemetry_sample)
 # --- header -----------------------------------------------------------------------
 
 def test_header_tracks_the_run_from_start_to_finish(started_run):
-    from app.ui.widgets import header
+    from gpu_bench.ui.widgets import header
 
     assert started_run.header.status() == header.LOADING
     warmup = started_run.spin_warmup.value()
@@ -853,7 +853,7 @@ def test_header_tracks_the_run_from_start_to_finish(started_run):
 
 
 def test_header_marks_a_failed_run(started_run):
-    from app.ui.widgets import header
+    from gpu_bench.ui.widgets import header
 
     started_run.trainer.error_occurred.emit("HF Training Error: CUDA out of memory")
 
@@ -869,7 +869,7 @@ def test_header_says_when_there_is_no_gpu(window):
 
 
 def test_hot_card_turns_its_gauge_red(window, telemetry_sample):
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     window.update_telemetry_ui(telemetry_sample(0, temp_gpu=91))
     gauge = window.gauges["temp"]
@@ -881,7 +881,7 @@ def test_hot_card_turns_its_gauge_red(window, telemetry_sample):
 def test_tile_states_reach_the_stylesheet(window, telemetry_sample):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     window.update_telemetry_ui(telemetry_sample(0, temp_headroom_c=3))
     tile = window.tiles["headroom"]
@@ -896,7 +896,7 @@ def _any_sample():
 
 
 def test_every_reading_has_a_gauge_or_a_tile(window):
-    from app.ui import readings
+    from gpu_bench.ui import readings
 
     assert list(window.gauges) == [key for key, _, _ in readings.GAUGES]
     assert set(readings.gauge_readings(_any_sample())) == set(window.gauges)
@@ -916,7 +916,7 @@ def test_power_and_vram_gauges_scale_to_the_card(window, telemetry_sample):
 
 
 def test_numeric_tiles_keep_a_minute_of_history(window, telemetry_sample):
-    from app.ui.widgets.sparkline import HISTORY_POINTS
+    from gpu_bench.ui.widgets.sparkline import HISTORY_POINTS
 
     for i in range(HISTORY_POINTS + 30):
         window.update_telemetry_ui(telemetry_sample(0, sm_clock_mhz=2400 + i))
@@ -929,7 +929,7 @@ def test_numeric_tiles_keep_a_minute_of_history(window, telemetry_sample):
 
 
 def test_trend_line_turns_with_the_tile_state(window, telemetry_sample):
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     window.update_telemetry_ui(telemetry_sample(0, temp_headroom_c=3))
 
@@ -1021,7 +1021,7 @@ def test_layout_is_remembered(window, tmp_path):
 def test_corrupt_layout_settings_are_ignored(tmp_path, qapp, monkeypatch):
     import pynvml
 
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.main_window import MainWindow
     monkeypatch.setattr(pynvml, "nvmlInit",
                         lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
     settings = _scratch_settings(tmp_path)
@@ -1059,7 +1059,7 @@ def test_buttons_mirror_their_actions(started_run):
 
 
 def test_shortcut_action_starts_and_stops_a_run(window, monkeypatch):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
     monkeypatch.setattr(mw, "TrainerWorker", FakeTrainer)
 
     window.act_start.trigger()
@@ -1088,7 +1088,7 @@ def test_toolbar_carries_the_run_commands(window):
 
 
 def test_icons_follow_the_theme(window):
-    from app.ui import icons
+    from gpu_bench.ui import icons
 
     window.set_theme_choice("dark")
     dark = window.act_export.icon().pixmap(18, 18).toImage()
@@ -1138,7 +1138,7 @@ def test_theme_follows_the_system_by_default(window):
 
 
 def test_system_theme_tracks_the_os(window, monkeypatch):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
 
     monkeypatch.setattr(mw.MainWindow, "system_is_dark", staticmethod(lambda: True))
     window._on_system_scheme_changed()
@@ -1150,7 +1150,7 @@ def test_system_theme_tracks_the_os(window, monkeypatch):
 
 
 def test_a_pinned_theme_ignores_the_os(window, monkeypatch):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
 
     window.set_theme_choice("light")
     monkeypatch.setattr(mw.MainWindow, "system_is_dark", staticmethod(lambda: True))
@@ -1180,7 +1180,7 @@ def test_theme_actions_are_exclusive(window):
 def test_unknown_saved_theme_falls_back_to_system(tmp_path, qapp, monkeypatch):
     import pynvml
 
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.main_window import MainWindow
     monkeypatch.setattr(pynvml, "nvmlInit",
                         lambda *a, **k: (_ for _ in ()).throw(Exception("no driver")))
     settings = _scratch_settings(tmp_path)
@@ -1197,7 +1197,7 @@ def test_unknown_saved_theme_falls_back_to_system(tmp_path, qapp, monkeypatch):
 # --- html report ----------------------------------------------------------------------
 
 def test_open_report_opens_the_exported_page(window, telemetry_sample, tmp_path, monkeypatch):
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
 
     monkeypatch.chdir(tmp_path)
     opened = []
@@ -1220,7 +1220,7 @@ def test_compare_opens_a_window_for_the_chosen_reports(window, telemetry_sample,
                                                        monkeypatch):
     import shutil
 
-    import app.ui.main_window as mw
+    import gpu_bench.ui.main_window as mw
 
     monkeypatch.chdir(tmp_path)
     _finish_run(window, telemetry_sample)

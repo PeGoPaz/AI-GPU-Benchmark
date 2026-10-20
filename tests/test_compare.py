@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import pytest
 
-from app.ui import compare_window as cw
+from gpu_bench.ui import compare_window as cw
 
 
 def _write_run(directory, name, results, model="Qwen2.5 1.5B", precision="BF16",
@@ -80,7 +80,7 @@ def test_a_value_only_one_run_has_is_not_best(tmp_path, telemetry_sample):
 def test_window_shows_a_column_and_a_curve_per_run(qapp, tmp_path, telemetry_sample):
     from PyQt6.QtGui import QColor
 
-    from app.ui.style import LIGHT
+    from gpu_bench.ui.style import LIGHT
 
     runs = [cw.load_run(_write_run(tmp_path, n, {"tokens_per_sec": v}, sample=telemetry_sample))
             for n, v in (("a", 9000), ("b", 12000))]

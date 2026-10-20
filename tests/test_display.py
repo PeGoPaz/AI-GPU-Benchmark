@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from app.utils import display
+from gpu_bench.utils import display
 
 
 def _df(sample, n=9):

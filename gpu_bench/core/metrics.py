@@ -11,7 +11,7 @@ normalises that, and the energy figures say what the throughput cost.
 import numpy as np
 import pandas as pd
 
-from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
+from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
 
 def flops_per_token(params_b: float, gradient_checkpointing: bool) -> float:

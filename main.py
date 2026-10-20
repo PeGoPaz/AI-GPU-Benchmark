@@ -1,6 +1,6 @@
 import sys
 
-from app.cli import build_parser, gui_only_misuse, run_headless
+from gpu_bench.cli import build_parser, gui_only_misuse, run_headless
 
 
 def main() -> int:
@@ -17,8 +17,8 @@ def main() -> int:
     # Imported here so a headless run never loads the widget stack.
     from PyQt6.QtWidgets import QApplication
 
-    from app.ui.about import app_icon
-    from app.ui.main_window import MainWindow
+    from gpu_bench.ui.about import app_icon
+    from gpu_bench.ui.main_window import MainWindow
 
     app = QApplication(sys.argv[:1] + qt_args)
     app.setStyle("Fusion")

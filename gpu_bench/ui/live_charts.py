@@ -5,7 +5,7 @@ matplotlib redrew every figure from scratch once a second: tolerable for a
 pyqtgraph keeps its curves and only swaps their data, so the charts follow
 telemetry at its own 4 Hz and can be zoomed and panned while a run goes on.
 
-The exported PNG stays on matplotlib (app/utils/plots.py): it is drawn once,
+The exported PNG stays on matplotlib (gpu_bench/utils/plots.py): it is drawn once,
 needs no interaction, and prints better. The series, colours and the
 throttle shading are the same on both, taken from the same constants.
 """
@@ -15,9 +15,9 @@ import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, QObject, QPointF, Qt
 from PyQt6.QtWidgets import QTabWidget, QWidget
 
-from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
-from app.ui.style import LIGHT, Palette
-from app.utils.plots import (
+from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
+from gpu_bench.ui.style import LIGHT, Palette
+from gpu_bench.utils.plots import (
     CLOCK_COLOR,
     FAN_COLOR,
     LOSS_COLOR,

@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from app.core import power_sampler
+from gpu_bench.core import power_sampler
 
 
 def _fake_module(monkeypatch, *, raises=None):

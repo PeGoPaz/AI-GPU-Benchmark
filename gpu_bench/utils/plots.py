@@ -1,6 +1,6 @@
 """matplotlib charts for everything drawn once: the exported PNG, the report.
 
-The live charts in the window are pyqtgraph (app/ui/live_charts.py), but they
+The live charts in the window are pyqtgraph (gpu_bench/ui/live_charts.py), but they
 take their series names, colours and throttle spans from here, so the two
 cannot drift apart the way two hand-maintained copies of each chart once did.
 Each function draws one panel onto an axes it is handed, which leaves figure
@@ -11,7 +11,7 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from app.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
+from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 
 TEMP_COLOR = '#ff4c4c'
 POWER_COLOR = '#4c72ff'

@@ -1,8 +1,8 @@
 """Tile readings: formatting and thresholds, without a window."""
 import pytest
 
-from app.core.telemetry import THROTTLE_SW_POWER_CAP, THROTTLE_SW_THERMAL
-from app.ui import readings
+from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP, THROTTLE_SW_THERMAL
+from gpu_bench.ui import readings
 
 
 @pytest.mark.parametrize("temp, state", [(65, "normal"), (80, "warn"), (86, "warn"),

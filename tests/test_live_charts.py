@@ -8,7 +8,7 @@ pytestmark = pytest.mark.ui
 
 @pytest.fixture
 def charts(qapp):
-    from app.ui.live_charts import LiveCharts
+    from gpu_bench.ui.live_charts import LiveCharts
     c = LiveCharts()
     c.resize(800, 500)
     return c
@@ -20,7 +20,7 @@ def _y(charts, name):
 
 
 def test_time_starts_at_the_first_snapshot(charts, telemetry_sample):
-    from app.ui.live_charts import TEMP
+    from gpu_bench.ui.live_charts import TEMP
 
     for i in range(4):
         charts.append(telemetry_sample(i))
@@ -32,7 +32,7 @@ def test_time_starts_at_the_first_snapshot(charts, telemetry_sample):
 
 
 def test_native_batches_are_thinned_but_keep_their_peak(charts, telemetry_sample):
-    from app.ui.live_charts import POWER_INSTANT
+    from gpu_bench.ui.live_charts import POWER_INSTANT
 
     charts.append(telemetry_sample(0))
     seconds = 100.0 + np.arange(125) * 0.002
@@ -48,7 +48,7 @@ def test_native_batches_are_thinned_but_keep_their_peak(charts, telemetry_sample
 
 def test_trace_before_any_telemetry_is_ignored(charts):
     """No time origin yet, so there is nothing to place it against."""
-    from app.ui.live_charts import POWER_INSTANT
+    from gpu_bench.ui.live_charts import POWER_INSTANT
 
     charts.append_trace((np.array([1.0, 2.0]), np.array([100.0, 110.0])))
     charts.refresh()
@@ -57,7 +57,7 @@ def test_trace_before_any_telemetry_is_ignored(charts):
 
 
 def test_power_limited_stretches_are_shaded_once(charts, telemetry_sample):
-    from app.core.telemetry import THROTTLE_SW_POWER_CAP
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP
 
     for i, mask in enumerate([0, THROTTLE_SW_POWER_CAP, THROTTLE_SW_POWER_CAP, 0]):
         charts.append(telemetry_sample(i, throttle_reasons=mask))
@@ -70,7 +70,7 @@ def test_power_limited_stretches_are_shaded_once(charts, telemetry_sample):
 
 
 def test_passive_card_draws_no_fan_curve(charts, telemetry_sample):
-    from app.ui.live_charts import FAN
+    from gpu_bench.ui.live_charts import FAN
 
     for i in range(3):
         charts.append(telemetry_sample(i, fan_speed_pct=None))
@@ -93,8 +93,8 @@ def test_warmup_line_appears_once_timing_starts(charts):
 
 
 def test_reset_starts_a_clean_run(charts, telemetry_sample):
-    from app.core.telemetry import THROTTLE_SW_POWER_CAP
-    from app.ui.live_charts import LOSS, TEMP
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP
+    from gpu_bench.ui.live_charts import LOSS, TEMP
 
     charts.append(telemetry_sample(0, throttle_reasons=THROTTLE_SW_POWER_CAP))
     charts.append(telemetry_sample(1))
@@ -108,7 +108,7 @@ def test_reset_starts_a_clean_run(charts, telemetry_sample):
 
 
 def test_final_draw_uses_the_complete_run(charts, telemetry_sample):
-    from app.ui.live_charts import POWER, POWER_INSTANT
+    from gpu_bench.ui.live_charts import POWER, POWER_INSTANT
 
     df = pd.DataFrame([telemetry_sample(i) for i in range(20)])
     df["time_sec"] = df["timestamp"] - df["timestamp"].iloc[0]
@@ -125,7 +125,7 @@ def test_final_draw_uses_the_complete_run(charts, telemetry_sample):
 
 
 def test_theme_recolours_every_legend_label(charts):
-    from app.ui.style import DARK
+    from gpu_bench.ui.style import DARK
 
     charts._set_instant(np.array([0.0, 1.0]), np.array([100.0, 120.0]))
     charts.set_theme(DARK)

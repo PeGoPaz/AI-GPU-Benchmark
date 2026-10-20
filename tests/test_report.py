@@ -3,7 +3,7 @@ import json
 
 import pandas as pd
 
-from app.utils import report
+from gpu_bench.utils import report
 
 
 def _df(sample, n=9):

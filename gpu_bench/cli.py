@@ -13,8 +13,8 @@ import sys
 
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
-from app.core.telemetry import TelemetryWorker
-from app.core.trainer import (
+from gpu_bench.core.telemetry import TelemetryWorker
+from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
     MODELS,
     PRECISIONS,
@@ -23,9 +23,9 @@ from app.core.trainer import (
     TrainerWorker,
     estimate_weights_gib,
 )
-from app.utils.display import RateTracker, format_progress, summary_rows
-from app.utils.logger import BenchmarkLogger
-from app.utils.report import build_report
+from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
+from gpu_bench.utils.logger import BenchmarkLogger
+from gpu_bench.utils.report import build_report
 
 # Exit status after Ctrl+C, by the shell's 128 + SIGINT convention: the
 # results are written, but a script can still tell the run was cut short.

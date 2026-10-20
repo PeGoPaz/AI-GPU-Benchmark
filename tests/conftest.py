@@ -2,7 +2,7 @@
 
 The app imports torch/transformers/peft/datasets at module level and talks to
 NVML on a real NVIDIA card. CI runners have neither, so we install lightweight
-stand-ins before any `app.*` module is imported.
+stand-ins before any `gpu_bench.*` module is imported.
 """
 import sys
 import types
@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 
 # --- Stub the heavy ML stack -------------------------------------------------
-# Must happen at import time, before app.core.trainer is pulled in.
+# Must happen at import time, before gpu_bench.core.trainer is pulled in.
 for _name in ("torch", "transformers", "peft", "datasets"):
     sys.modules.setdefault(_name, mock.MagicMock())
 

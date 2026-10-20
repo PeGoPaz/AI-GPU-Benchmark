@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.utils.report import package_versions
+from gpu_bench.utils.report import package_versions
 
 ICON_PATH = Path(__file__).with_name("assets") / "icon.svg"
 REPO_URL = "https://github.com/PeGoPaz/AI-GPU-Benchmark"
