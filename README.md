@@ -198,7 +198,7 @@ tests/                         — pytest suite; the ML stack and NVML are stubb
 .github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
-mypy.ini                       — type-check settings
+mypy.ini                       — type-check settings (strict, the whole package)
 requirements.txt               — runtime dependencies
 requirements-dev.txt           — test and lint tooling (no ML stack)
 ```
@@ -228,7 +228,7 @@ mypy
 QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 ```
 
-`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy, a `compileall` parse check, and the test suite on Python 3.10 and 3.13 on Linux, and on Python 3.13 on Windows. The native module gets its own jobs: a warnings-as-errors build with the C++ tests on Linux, macOS and Windows (MSVC), the same tests under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer, a pinned `clang-format` check, and the Python-side tests against the freshly built module. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
+`requirements-dev.txt` is the same short list CI installs — no torch, no Hugging Face stack. Tests that build the real window are marked `ui` and skip themselves when Qt cannot start headless. CI runs the same checks on every push to `main` and on every pull request: ruff, mypy in strict mode, a `compileall` parse check, and the test suite on Python 3.10 and 3.13 on Linux, and on Python 3.13 on Windows. The native module gets its own jobs: a warnings-as-errors build with the C++ tests on Linux, macOS and Windows (MSVC), the same tests under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer, a pinned `clang-format` check, and the Python-side tests against the freshly built module. Both linters are pinned in `requirements-dev.txt` so an upgrade cannot turn CI red on its own.
 
 ### Native module (optional)
 

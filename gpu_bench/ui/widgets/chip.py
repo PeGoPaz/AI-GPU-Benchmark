@@ -5,7 +5,7 @@ times a run, and a per-instance stylesheet rewritten on every change is
 exactly what style.py was introduced to get rid of.
 """
 from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPaintEvent, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 
@@ -40,7 +40,7 @@ class Chip(QWidget):
         return QSize(metrics.horizontalAdvance(self._text) + 2 * self.PAD_X,
                      metrics.height() + 2 * self.PAD_Y)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)

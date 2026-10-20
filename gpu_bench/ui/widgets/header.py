@@ -5,6 +5,8 @@ line, and the run's state nowhere at all. A benchmark result is meaningless
 without the first two, and the third is the first thing anyone glancing at
 the window wants to know.
 """
+from typing import Any
+
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from gpu_bench.ui.style import LIGHT, Palette
@@ -20,7 +22,7 @@ STOPPED = "Stopped"
 FAILED = "Failed"
 
 
-def device_details(info: dict) -> str:
+def device_details(info: dict[str, Any]) -> str:
     """'8.0 GiB · driver 580.82 · CUDA 13.0 · 115 W limit · PCIe Gen4 x8', skipping gaps."""
     parts = []
     if info.get("vram_total_mb"):
@@ -80,12 +82,12 @@ class HeaderBar(QFrame):
         self.lbl_gpu.setText("No NVIDIA GPU detected")
         self.lbl_details.setText(reason)
 
-    def set_device_info(self, info: dict) -> None:
+    def set_device_info(self, info: dict[str, Any]) -> None:
         if info.get("name"):
             self.lbl_gpu.setText(info["name"])
         self.lbl_details.setText(device_details(info))
 
-    def set_sampler(self, status: dict) -> None:
+    def set_sampler(self, status: dict[str, Any]) -> None:
         self._sampler_active = bool(status.get("active"))
         self.sampler_chip.setToolTip(status.get("detail", ""))
         self.sampler_chip.show()

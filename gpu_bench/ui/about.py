@@ -7,6 +7,7 @@ question about any odd number. The dialog answers it and copies the answer.
 import platform
 import sys
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, Qt
 from PyQt6.QtGui import QGuiApplication, QIcon
@@ -40,7 +41,7 @@ def native_module_status() -> str:
     return f"{info['version']}, {info['compiler']}, {info['build_type']}"
 
 
-def about_rows(device: dict | None = None, sampler: dict | None = None) -> list[tuple[str, str]]:
+def about_rows(device: dict[str, Any] | None = None, sampler: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """(label, value) pairs: platform, toolkit, ML stack, native module, GPU."""
     versions = package_versions()
     rows = [

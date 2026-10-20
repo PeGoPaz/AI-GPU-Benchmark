@@ -8,7 +8,7 @@ warm-up then measured, fills them as steps complete, and animates while the
 model loads, before there is any step to count.
 """
 from PyQt6.QtCore import QRectF, Qt, QTimer
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPaintEvent, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from gpu_bench.ui.style import LIGHT, Palette
@@ -106,7 +106,7 @@ class PhaseProgressBar(QWidget):
         self._stripe_offset = (self._stripe_offset + 1.5) % 24
         self.update()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent | None) -> None:
         t = self._theme
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

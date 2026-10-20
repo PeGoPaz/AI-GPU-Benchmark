@@ -9,14 +9,18 @@ The exported PNG stays on matplotlib (gpu_bench/utils/plots.py): it is drawn onc
 needs no interaction, and prints better. The series, colours and the
 throttle shading are the same on both, taken from the same constants.
 """
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, QObject, QPointF, Qt
+from PyQt6.QtGui import QPen
 from PyQt6.QtWidgets import QTabWidget, QWidget
 
 from gpu_bench.core.telemetry import POWER_LIMIT_BITS, THERMAL_LIMIT_BITS
 from gpu_bench.ui.style import LIGHT, Palette
+from gpu_bench.utils.logger import PowerChunk
 from gpu_bench.utils.plots import (
     CLOCK_COLOR,
     FAN_COLOR,
@@ -38,10 +42,12 @@ UTIL, FAN, CLOCK = "GPU Utilization (%)", "Fan (%)", "SM Clock (MHz)"
 LOSS = "Loss"
 
 
-def _pen(color: str, width: float = 2.0, style=Qt.PenStyle.SolidLine, alpha: int = 255):
+def _pen(color: str, width: float = 2.0, style: Qt.PenStyle = Qt.PenStyle.SolidLine,
+         alpha: int = 255) -> QPen:
     c = pg.mkColor(color)
     c.setAlpha(alpha)
-    return pg.mkPen(c, width=width, style=style)
+    pen: QPen = pg.mkPen(c, width=width, style=style)
+    return pen
 
 
 def _twin_view(plot: pg.PlotItem) -> pg.ViewBox:
@@ -58,7 +64,7 @@ def _twin_view(plot: pg.PlotItem) -> pg.ViewBox:
     plot.getAxis("right").linkToView(view)
     view.setXLink(plot)
 
-    def follow():
+    def follow() -> None:
         view.setGeometry(plot.vb.sceneBoundingRect())
         view.linkedViewChanged(plot.vb, view.XAxis)
 
@@ -157,7 +163,7 @@ class LiveCharts(QTabWidget):
     def reset(self) -> None:
         """A new run: the charts start empty and time starts at zero."""
         self._t0: float | None = None
-        self._rows: dict[str, list] = {k: [] for k in
+        self._rows: dict[str, list[Any]] = {k: [] for k in
                                        ("t", "temp", "power", "util", "fan", "clock", "throttle")}
         self._trace_t: list[np.ndarray] = []
         self._trace_w: list[np.ndarray] = []
@@ -175,7 +181,7 @@ class LiveCharts(QTabWidget):
     def set_warmup(self, steps: int) -> None:
         self._warmup = steps
 
-    def append(self, snapshot: dict) -> None:
+    def append(self, snapshot: dict[str, Any]) -> None:
         if self._t0 is None:
             self._t0 = snapshot["timestamp"]
         r = self._rows
@@ -188,7 +194,7 @@ class LiveCharts(QTabWidget):
         r["clock"].append(snapshot["sm_clock_mhz"])
         r["throttle"].append(snapshot.get("throttle_reasons"))
 
-    def append_trace(self, chunk) -> None:
+    def append_trace(self, chunk: PowerChunk) -> None:
         """A native sampler batch, thinned on arrival to its min and max.
 
         Keeping every sample for live drawing would mean redrawing hundreds of
@@ -346,7 +352,8 @@ class LiveCharts(QTabWidget):
             line.hide()
         self.readout.setText("")
 
-    def _on_mouse_moved(self, event) -> None:
+    def _on_mouse_moved(self, event: tuple[QPointF]) -> None:
+        # SignalProxy delivers the scene's sigMouseMoved arguments as a tuple.
         pos = event[0]
         for plot in (self.thermal_plot, self.util_plot):
             if plot.sceneBoundingRect().contains(pos):
@@ -388,4 +395,4 @@ class LiveCharts(QTabWidget):
                 legend.setPen(pg.mkPen(theme.chart_grid))
 
     def axis_text_color(self, plot: pg.PlotItem, side: str) -> str:
-        return plot.getAxis(side).textPen().color().name().upper()
+        return str(plot.getAxis(side).textPen().color().name().upper())

@@ -10,6 +10,8 @@ import argparse
 import re
 import signal
 import sys
+from collections.abc import Callable, Iterable
+from typing import Any, TextIO, TypeVar
 
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
@@ -21,7 +23,10 @@ from gpu_bench.core.trainer import (
     PRECISIONS,
     PRESETS,
     SEQ_LENGTHS,
+    ModelSpec,
+    PrecisionSpec,
     TrainerWorker,
+    WorkloadPreset,
     estimate_weights_gib,
 )
 from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
@@ -37,12 +42,15 @@ _WORKLOAD_FLAGS = ("model", "precision", "steps", "batch_size", "seq_len",
                    "gradient_checkpointing")
 
 
+_Spec = TypeVar("_Spec", ModelSpec, PrecisionSpec, WorkloadPreset)
+
+
 def _normalise(name: str) -> str:
     """'Qwen2.5 7B', 'qwen2.5-7b' and 'QWEN2.5_7B' all become 'qwen2.57b'."""
     return re.sub(r"[\s\-_()]", "", name.lower())
 
 
-def resolve(registry, name: str, what: str):
+def resolve(registry: Iterable[_Spec], name: str, what: str) -> _Spec:
     """Finds a model, precision or preset by label, HF id or unique prefix.
 
     Labels such as "INT4 (NF4)" or "Phi-3.5 mini 3.8B" are awkward to type,
@@ -50,6 +58,7 @@ def resolve(registry, name: str, what: str):
     exactly one entry. "qwen2.5" matches three and is refused with all three
     named, rather than silently picking one.
     """
+    registry = list(registry)
     key = _normalise(name)
     exact = [spec for spec in registry
              if key in (_normalise(spec.label),
@@ -65,7 +74,7 @@ def resolve(registry, name: str, what: str):
     raise argparse.ArgumentTypeError(f"{what} '{name}' {reason}: {labels}")
 
 
-def _at_least(minimum: int):
+def _at_least(minimum: int) -> Callable[[str], int]:
     def parse(text: str) -> int:
         value = int(text)
         if value < minimum:
@@ -109,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def workload_from_args(args: argparse.Namespace) -> dict:
+def workload_from_args(args: argparse.Namespace) -> dict[str, Any]:
     """TrainerWorker keyword arguments: the preset, with any flags on top."""
     preset = args.preset
     workload = {
@@ -138,7 +147,7 @@ def gui_only_misuse(args: argparse.Namespace) -> str | None:
     return None
 
 
-def print_registry(out=None) -> None:
+def print_registry(out: TextIO | None = None) -> None:
     # Looked up per call, not bound as a default: sys.stdout may have been
     # replaced (redirected, captured) since the module was imported.
     out = out or sys.stdout
@@ -165,17 +174,19 @@ class HeadlessRun(QObject):
 
     done = pyqtSignal(int)
 
-    def __init__(self, workload: dict, output_dir: str = "logs", out=None,
-                 trainer_cls=TrainerWorker, telemetry_cls=TelemetryWorker,
-                 interval_ms: int = 250, parent=None):
+    def __init__(self, workload: dict[str, Any], output_dir: str = "logs",
+                 out: TextIO | None = None,
+                 trainer_cls: type[TrainerWorker] = TrainerWorker,
+                 telemetry_cls: type[TelemetryWorker] = TelemetryWorker,
+                 interval_ms: int = 250, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.workload = workload
         self.output_dir = output_dir
         self.out = out or sys.stdout
         self.exit_code: int | None = None
         self.logger = BenchmarkLogger()
-        self._device: dict | None = None
-        self._sampler_status: dict | None = None
+        self._device: dict[str, Any] | None = None
+        self._sampler_status: dict[str, Any] | None = None
         self._loss_steps: list[int] = []
         self._loss_values: list[float] = []
         self._rate = RateTracker()
@@ -222,13 +233,13 @@ class HeadlessRun(QObject):
         self.trainer.stop()
 
     @pyqtSlot(dict)
-    def _on_device_info(self, info: dict) -> None:
+    def _on_device_info(self, info: dict[str, Any]) -> None:
         self._device = info
         self._print(f"GPU: {info.get('name')}, driver {info.get('driver_version') or '?'}, "
                     f"CUDA {info.get('cuda_driver_version') or '?'}")
 
     @pyqtSlot(dict)
-    def _on_sampler_status(self, status: dict) -> None:
+    def _on_sampler_status(self, status: dict[str, Any]) -> None:
         self._sampler_status = status
         if status["active"]:
             self._print(f"Power sampler: native, {status['detail']}, "
@@ -266,7 +277,7 @@ class HeadlessRun(QObject):
         self._last_loss = loss
 
     @pyqtSlot(dict)
-    def _on_finished(self, summary: dict) -> None:
+    def _on_finished(self, summary: dict[str, Any]) -> None:
         df = self.logger.stop()
         if df is None:
             self._print("\nNo telemetry was collected, so there is nothing to export.")

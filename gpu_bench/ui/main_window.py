@@ -1,7 +1,18 @@
 import os
+from collections.abc import Sequence
+from typing import Any
 
+import pandas as pd
 from PyQt6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl, pyqtSlot
-from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QKeySequence
+from PyQt6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QDesktopServices,
+    QGuiApplication,
+    QKeySequence,
+    QShowEvent,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -38,6 +49,7 @@ from gpu_bench.core.trainer import (
     SEQ_LENGTHS,
     VRAM_RESERVE_GIB,
     TrainerWorker,
+    WorkloadPreset,
     estimate_weights_gib,
     fits_in_vram,
 )
@@ -50,6 +62,7 @@ from gpu_bench.ui.style import (
     START_GREEN,
     STOP_RED,
     THEMES,
+    Palette,
     build_qpalette,
     build_stylesheet,
 )
@@ -61,7 +74,7 @@ from gpu_bench.ui.widgets.phase_progress import PhaseProgressBar
 from gpu_bench.ui.widgets.result_card import ResultCard
 from gpu_bench.ui.widgets.tile import MetricTile
 from gpu_bench.utils.display import RateTracker, format_progress, headline_cards, summary_rows
-from gpu_bench.utils.logger import BenchmarkLogger
+from gpu_bench.utils.logger import BenchmarkLogger, PowerChunk
 from gpu_bench.utils.report import build_report
 
 SETTINGS_ORG = SETTINGS_APP = "AI-GPU-Benchmark"
@@ -81,7 +94,7 @@ def _mirror(button: QPushButton, action: QAction) -> None:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings=None):
+    def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
         # Injectable so tests write to a scratch file instead of the user's
         # real preferences.
@@ -168,8 +181,8 @@ class MainWindow(QMainWindow):
         self.spin_batch.setRange(1, 64)
 
         self.cmb_precision = QComboBox()
-        for spec in PRECISIONS:
-            self.cmb_precision.addItem(spec.label, spec)
+        for precision in PRECISIONS:
+            self.cmb_precision.addItem(precision.label, precision)
         self.cmb_precision.setToolTip(
             "BF16 needs Ampere or newer. FP32 runs anywhere but roughly "
             "doubles VRAM and time. INT8/INT4 store the frozen base model "
@@ -243,7 +256,7 @@ class MainWindow(QMainWindow):
         self.act_open_report.setToolTip("Open the last exported HTML report in the browser (Ctrl+O)")
         self.act_open_report.triggered.connect(self.open_report)
         self.act_open_report.setEnabled(False)
-        self._last_html = None
+        self._last_html: str | None = None
 
         self.btn_start = QPushButton("Start Stress Test")
         self.btn_start.setObjectName("btnStart")
@@ -298,8 +311,10 @@ class MainWindow(QMainWindow):
         self.summary_table = QTableWidget()
         self.summary_table.setColumnCount(2)
         self.summary_table.setHorizontalHeaderLabels(["Metric", "Value"])
-        self.summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.summary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        table_header = self.summary_table.horizontalHeader()
+        assert table_header is not None    # a QTableWidget always has one
+        table_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.summary_table.setMaximumHeight(260)
 
@@ -382,20 +397,27 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([440, 920])
 
         # Menu: the theme is a preference, not a benchmark setting.
-        file_menu = self.menuBar().addMenu("&File")
+        menu_bar = self.menuBar()
+        assert menu_bar is not None        # QMainWindow creates it on first use
+        file_menu = menu_bar.addMenu("&File")
+        assert file_menu is not None
         self.act_compare = QAction("&Compare runs…", self)
         self.act_compare.setShortcut(QKeySequence("Ctrl+Shift+O"))
         self.act_compare.setToolTip("Open several exported run reports side by side")
         self.act_compare.triggered.connect(self.compare_runs)
         file_menu.addAction(self.act_compare)
-        self._compare_windows = []
+        self._compare_windows: list[CompareWindow] = []
 
-        run_menu = self.menuBar().addMenu("&Run")
+        run_menu = menu_bar.addMenu("&Run")
+        assert run_menu is not None
         for action in (self.act_start, self.act_stop, self.act_export, self.act_open_report):
             run_menu.addAction(action)
-        view_menu = self.menuBar().addMenu("&View")
+        view_menu = menu_bar.addMenu("&View")
+        assert view_menu is not None
         # Theme: follow the system by default, or pin light or dark.
-        self.theme_menu = view_menu.addMenu("&Theme")
+        theme_menu = view_menu.addMenu("&Theme")
+        assert theme_menu is not None
+        self.theme_menu = theme_menu
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
         self.theme_actions = {}
@@ -422,7 +444,8 @@ class MainWindow(QMainWindow):
         self.act_log.toggled.connect(self.log_panel.setVisible)
         view_menu.addAction(self.act_log)
 
-        help_menu = self.menuBar().addMenu("&Help")
+        help_menu = menu_bar.addMenu("&Help")
+        assert help_menu is not None
         self.act_about = QAction("&About AI GPU Benchmark", self)
         self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
         self.act_about.triggered.connect(self.show_about)
@@ -450,7 +473,7 @@ class MainWindow(QMainWindow):
         self._theme = LIGHT
         self._apply_theme(LIGHT)
 
-        self._vram_total_mib = None          # MiB, from the first snapshot
+        self._vram_total_mib: float | None = None  # MiB, from the first snapshot
         self.cmb_model.currentIndexChanged.connect(self._update_fit_hint)
         self.cmb_precision.currentIndexChanged.connect(self._update_fit_hint)
 
@@ -468,7 +491,7 @@ class MainWindow(QMainWindow):
 
         # --- INITIALIZE THREADS ---
         self.logger = BenchmarkLogger()
-        self._last_telemetry_error = None
+        self._last_telemetry_error: str | None = None
         self.telemetry = TelemetryWorker(interval_ms=250)
         self.telemetry.data_updated.connect(self.update_telemetry_ui)
         self.telemetry.gpu_name_ready.connect(self._on_gpu_name_ready)
@@ -478,13 +501,14 @@ class MainWindow(QMainWindow):
         self.telemetry.error_occurred.connect(self._on_telemetry_error)
         self.telemetry.start()
 
-        self.trainer = None
-        self._device_info = None
-        self._sampler_status = None
-        self._last_summary = None
+        self.trainer: TrainerWorker | None = None
+        self._device_info: dict[str, Any] | None = None
+        self._sampler_status: dict[str, Any] | None = None
+        self._last_summary: dict[str, Any] | None = None
 
         # Live charts: redrawn from what the logger has collected so far.
-        self._loss_steps, self._loss_values = [], []
+        self._loss_steps: list[int] = []
+        self._loss_values: list[float] = []
         self._run_warmup = 0
         self._total_steps = 0
         self._rate = RateTracker()
@@ -492,19 +516,19 @@ class MainWindow(QMainWindow):
         self._live_timer.setInterval(LIVE_REFRESH_MS)
         self._live_timer.timeout.connect(self._refresh_live_charts)
 
-    def log_to_console(self, text: str):
+    def log_to_console(self, text: str) -> None:
         """Appends text to the console window."""
         self.console.append(text)
 
     @pyqtSlot(str)
-    def _on_gpu_name_ready(self, gpu_name: str):
+    def _on_gpu_name_ready(self, gpu_name: str) -> None:
         """Updates the window title once the GPU name is detected."""
         self.setWindowTitle(f"AI GPU Benchmark — {gpu_name}")
         self.header.set_gpu_name(gpu_name)
         self.log_to_console(f"Detected GPU: {gpu_name}")
 
     @pyqtSlot(dict)
-    def _on_device_info(self, info: dict):
+    def _on_device_info(self, info: dict[str, Any]) -> None:
         self._device_info = info
         self.header.set_device_info(info)
         if info.get("driver_version"):
@@ -512,7 +536,7 @@ class MainWindow(QMainWindow):
                 f"Driver {info['driver_version']}, CUDA {info.get('cuda_driver_version') or '?'}")
 
     @pyqtSlot(dict)
-    def _on_sampler_status(self, status: dict):
+    def _on_sampler_status(self, status: dict[str, Any]) -> None:
         self._sampler_status = status
         self.header.set_sampler(status)
         if status["active"]:
@@ -522,13 +546,13 @@ class MainWindow(QMainWindow):
             self.log_to_console(f"Power sampler: {status['detail']}")
 
     @pyqtSlot(object)
-    def _on_power_trace(self, chunk):
+    def _on_power_trace(self, chunk: PowerChunk) -> None:
         self.logger.log_power_trace(chunk)
         if self.logger.is_logging:
             self.charts.append_trace(chunk)
 
     @pyqtSlot(str)
-    def _on_telemetry_error(self, message: str):
+    def _on_telemetry_error(self, message: str) -> None:
         """Surfaces NVML failures instead of leaving the dashboard on '--'.
 
         Read errors repeat on every poll, so an identical consecutive message
@@ -547,7 +571,7 @@ class MainWindow(QMainWindow):
         self.log_to_console(f"TELEMETRY ERROR: {message}")
 
     @pyqtSlot(dict)
-    def update_telemetry_ui(self, data: dict):
+    def update_telemetry_ui(self, data: dict[str, Any]) -> None:
         """Updates the dashboard with live PyNVML data."""
         self.logger.log(data)
         if self.logger.is_logging:
@@ -559,7 +583,7 @@ class MainWindow(QMainWindow):
         for key, _, read, _ in readings.TILES:
             self.tiles[key].set_reading(read(data))
 
-    def _show_gauges(self, data: dict):
+    def _show_gauges(self, data: dict[str, Any]) -> None:
         limit = (self._device_info or {}).get("power_limit_w")
         if limit:
             self.gauges["power"].set_maximum(limit)
@@ -574,13 +598,15 @@ class MainWindow(QMainWindow):
 
     # --- theme & persisted settings --------------------------------------------
 
-    def _apply_theme(self, theme):
+    def _apply_theme(self, theme: Palette) -> None:
         self._theme = theme
         app = QApplication.instance()
         if isinstance(app, QApplication):
             # App-wide rather than on the window: combo popups and tooltips
             # are top-level windows and would not inherit it.
-            app.setPalette(build_qpalette(theme, self.style().standardPalette()))
+            style = self.style()
+            assert style is not None
+            app.setPalette(build_qpalette(theme, style.standardPalette()))
         self.setStyleSheet(build_stylesheet(theme))
         self._paint_icons(theme)
         self.phase_bar.set_theme(theme)
@@ -594,10 +620,10 @@ class MainWindow(QMainWindow):
     def about_dialog(self) -> AboutDialog:
         return AboutDialog(about_rows(self._device_info, self._sampler_status), self)
 
-    def show_about(self):
+    def show_about(self) -> None:
         self.about_dialog().exec()
 
-    def _paint_icons(self, theme):
+    def _paint_icons(self, theme: Palette) -> None:
         """Toolbar glyphs in the theme's text colour; Start and Stop in theirs."""
         text = theme.text_strong
         for action, glyph, color in ((self.act_start, "start", START_GREEN),
@@ -620,7 +646,7 @@ class MainWindow(QMainWindow):
     def theme_choice(self) -> str:
         return self._theme_choice
 
-    def set_theme_choice(self, choice: str):
+    def set_theme_choice(self, choice: str) -> None:
         """System, light or dark; System re-resolves when the OS changes."""
         if choice not in self.theme_actions:
             choice = SYSTEM
@@ -630,15 +656,15 @@ class MainWindow(QMainWindow):
         self._apply_theme(THEMES[name])
         self.settings.setValue("ui/theme", choice)
 
-    def _on_system_scheme_changed(self, *_):
+    def _on_system_scheme_changed(self, *_: object) -> None:
         if self._theme_choice == SYSTEM:
             self.set_theme_choice(SYSTEM)
 
-    def _toggle_theme(self):
+    def _toggle_theme(self) -> None:
         """Ctrl+Shift+D: the other theme, pinned — it overrides System."""
         self.set_theme_choice("light" if self._theme.name == "dark" else "dark")
 
-    def _save_settings(self):
+    def _save_settings(self) -> None:
         """Remembers the workload, so the next launch opens on the last run."""
         s = self.settings
         s.setValue("ui/theme", self._theme_choice)
@@ -659,11 +685,11 @@ class MainWindow(QMainWindow):
     def _setting_int(self, key: str, default: int) -> int:
         """An int from the settings file, or the default if it is not one."""
         try:
-            return self.settings.value(key, default, type=int)
+            return int(self.settings.value(key, default, type=int))
         except (TypeError, ValueError):
             return default
 
-    def _restore_settings(self):
+    def _restore_settings(self) -> None:
         """Reapplies saved settings, skipping anything that no longer exists.
 
         Values are matched by label, so a model dropped from the registry or a
@@ -703,7 +729,7 @@ class MainWindow(QMainWindow):
         self.set_theme_choice(s.value("ui/theme", SYSTEM, type=str))
         self._restore_layout()
 
-    def _restore_layout(self):
+    def _restore_layout(self) -> None:
         """Window size and panel splits as they were left. A missing or
         corrupt value is ignored: the defaults set in __init__ stand."""
         s = self.settings
@@ -715,7 +741,7 @@ class MainWindow(QMainWindow):
                 self._default_split_pending = False
         self.act_log.setChecked(s.value("ui/show_log", True, type=bool))
 
-    def _apply_preset(self, preset):
+    def _apply_preset(self, preset: WorkloadPreset) -> None:
         """Writes a preset into the fields without bouncing back to Custom."""
         self._applying_preset = True
         try:
@@ -729,7 +755,7 @@ class MainWindow(QMainWindow):
             self._applying_preset = False
         self._sync_preset_combo()
 
-    def _matching_preset(self):
+    def _matching_preset(self) -> WorkloadPreset | None:
         """The preset the fields currently spell out, or None for Custom."""
         current = (self.cmb_model.currentData(), self.cmb_precision.currentData(),
                    self.spin_steps.value(), self.spin_batch.value(),
@@ -741,13 +767,13 @@ class MainWindow(QMainWindow):
                 return preset
         return None
 
-    def _on_preset_selected(self, index: int):
+    def _on_preset_selected(self, index: int) -> None:
         preset = self.cmb_preset.itemData(index)
         # Picking Custom by hand keeps whatever the fields already hold.
         if preset is not None:
             self._apply_preset(preset)
 
-    def _sync_preset_combo(self):
+    def _sync_preset_combo(self) -> None:
         if self._applying_preset:
             return
         preset = self._matching_preset()
@@ -756,7 +782,7 @@ class MainWindow(QMainWindow):
         self.cmb_preset.setCurrentIndex(index)
         self.cmb_preset.blockSignals(False)
 
-    def _update_fit_hint(self):
+    def _update_fit_hint(self) -> None:
         """Shows the weights' footprint against the card, flagging a misfit.
 
         A warning rather than a lock: the estimate covers weights only, and
@@ -780,10 +806,12 @@ class MainWindow(QMainWindow):
         # A dynamic property drives the stylesheet; Qt only re-reads it on a
         # re-polish, so the colour would otherwise stick to the first state.
         self.lbl_fit.setProperty("warning", misfit)
-        self.lbl_fit.style().unpolish(self.lbl_fit)
-        self.lbl_fit.style().polish(self.lbl_fit)
+        style = self.lbl_fit.style()
+        if style is not None:
+            style.unpolish(self.lbl_fit)
+            style.polish(self.lbl_fit)
 
-    def start_benchmark(self):
+    def start_benchmark(self) -> None:
         """Disables UI and fires up the PyTorch training thread."""
         self.act_start.setEnabled(False)
         self.act_stop.setEnabled(True)
@@ -829,7 +857,7 @@ class MainWindow(QMainWindow):
         self.trainer.error_occurred.connect(self.on_benchmark_error)
         self.trainer.start()
 
-    def stop_benchmark(self):
+    def stop_benchmark(self) -> None:
         """Requests an early stop; the run ends at the next step boundary."""
         if self.trainer and self.trainer.isRunning():
             self.log_to_console("\nStop requested — finishing current step...")
@@ -838,12 +866,12 @@ class MainWindow(QMainWindow):
         self.act_stop.setEnabled(False)
 
     @pyqtSlot(int)
-    def _on_max_steps(self, total: int):
+    def _on_max_steps(self, total: int) -> None:
         self._total_steps = total
         self.phase_bar.set_total(total)
 
     @pyqtSlot(int)
-    def _on_progress(self, step: int):
+    def _on_progress(self, step: int) -> None:
         """Moves the bar and recomputes rate and ETA."""
         self.phase_bar.set_step(step)
         if self.header.status() != header.STOPPING:
@@ -853,16 +881,16 @@ class MainWindow(QMainWindow):
         self.lbl_progress.setText(format_progress(step, self._total_steps, rate))
 
     @pyqtSlot(int, float)
-    def _on_loss(self, step: int, loss: float):
+    def _on_loss(self, step: int, loss: float) -> None:
         self._loss_steps.append(step)
         self._loss_values.append(loss)
         self.charts.append_loss(step, loss)
 
-    def _refresh_live_charts(self):
+    def _refresh_live_charts(self) -> None:
         self.charts.refresh()
 
     @pyqtSlot(dict)
-    def on_benchmark_finished(self, summary: dict):
+    def on_benchmark_finished(self, summary: dict[str, Any]) -> None:
         self._live_timer.stop()
         self.phase_bar.finish()
         self.header.set_status(header.STOPPED if summary.get('aborted') else header.DONE)
@@ -886,7 +914,7 @@ class MainWindow(QMainWindow):
         self.act_export.setEnabled(True)
 
     @pyqtSlot(str)
-    def on_benchmark_error(self, message: str):
+    def on_benchmark_error(self, message: str) -> None:
         """Recovers the UI from a failed run.
 
         TrainerWorker.run() emits error_occurred and returns without ever
@@ -905,13 +933,13 @@ class MainWindow(QMainWindow):
         self._set_idle_controls()
         self.act_export.setEnabled(df is not None)
 
-    def _set_idle_controls(self):
+    def _set_idle_controls(self) -> None:
         """Returns the control panel to its ready-for-a-new-run state."""
         self.workload_group.setEnabled(True)
         self.act_stop.setEnabled(False)
         self.act_start.setEnabled(True)
 
-    def _render_plots(self, df, summary: dict):
+    def _render_plots(self, df: pd.DataFrame, summary: dict[str, Any]) -> None:
         """Final draw from the complete run, exactly as it will be exported."""
         self.charts.show_run(df, self.logger.power_trace())
         self.chart_stack.setCurrentWidget(self.charts)
@@ -921,12 +949,12 @@ class MainWindow(QMainWindow):
         self._render_summary(df, summary)
         self.log_to_console("Summary and plots rendered.")
 
-    def _toggle_details(self, shown: bool):
+    def _toggle_details(self, shown: bool) -> None:
         self.summary_table.setVisible(shown)
         self.btn_details.setArrowType(Qt.ArrowType.DownArrow if shown
                                       else Qt.ArrowType.RightArrow)
 
-    def _render_summary(self, df, summary: dict):
+    def _render_summary(self, df: pd.DataFrame, summary: dict[str, Any]) -> None:
         """Headline cards, and the full table under Details."""
         trace = self.logger.power_trace()
         headlines = headline_cards(df, summary, trace)
@@ -948,7 +976,7 @@ class MainWindow(QMainWindow):
 
         self.summary_stack.setCurrentWidget(self._results_page)
 
-    def export_results(self):
+    def export_results(self) -> None:
         """Exports the last benchmark's telemetry to CSV and renders plot PNG."""
         df = self.logger.to_dataframe()
         if df is None:
@@ -973,7 +1001,7 @@ class MainWindow(QMainWindow):
             self._last_html = paths.html
             self.act_open_report.setEnabled(True)
 
-    def compare_runs(self, paths=None):
+    def compare_runs(self, paths: Sequence[str] | None = None) -> CompareWindow | None:
         """Opens a comparison of the chosen reports; asks for them if not given."""
         if not paths:
             paths, _ = QFileDialog.getOpenFileNames(
@@ -990,11 +1018,11 @@ class MainWindow(QMainWindow):
         window.show()
         return window
 
-    def open_report(self):
+    def open_report(self) -> None:
         if self._last_html:
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(self._last_html)))
 
-    def showEvent(self, event):
+    def showEvent(self, event: QShowEvent | None) -> None:
         """First show without a saved layout: most of the height to the charts.
 
         Done here rather than in __init__ because a splitter only knows its
@@ -1008,7 +1036,7 @@ class MainWindow(QMainWindow):
             log = int(total * 0.18)
             self.right_splitter.setSizes([total - summary - log, summary, log])
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         """Clean up threads on exit."""
         self._live_timer.stop()
         self._save_settings()
@@ -1017,4 +1045,5 @@ class MainWindow(QMainWindow):
             # Shutdown is the one place we genuinely must block, so the
             # training thread cannot outlive the window it reports into.
             self.trainer.wait_for_exit()
-        event.accept()
+        if event is not None:
+            event.accept()

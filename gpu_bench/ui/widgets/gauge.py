@@ -8,7 +8,7 @@ the middle keeps the precision.
 import math
 
 from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPaintEvent, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from gpu_bench.ui.readings import CRIT, NORMAL, WARN
@@ -22,7 +22,7 @@ def nice_ceiling(value: float) -> float:
     """Rounds a scale maximum up to 1, 2 or 5 × 10^n, so the scale reads cleanly."""
     if value <= 0:
         return 1.0
-    magnitude = 10 ** math.floor(math.log10(value))
+    magnitude = 10.0 ** math.floor(math.log10(value))
     for step in (1, 2, 2.5, 5, 10):
         if value <= step * magnitude:
             return step * magnitude
@@ -108,7 +108,7 @@ class ArcGauge(QWidget):
             thickness / 2, thickness / 2, -thickness / 2, -thickness / 2)
         return rect, thickness, side
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent | None) -> None:
         t = self._theme
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

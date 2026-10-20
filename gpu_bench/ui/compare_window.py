@@ -9,6 +9,7 @@ temperature curves from the CSVs the reports name.
 import json
 import os
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 import pyqtgraph as pg
@@ -50,7 +51,7 @@ METRICS = (
 @dataclass
 class Run:
     path: str
-    report: dict
+    report: dict[str, Any]
     telemetry: pd.DataFrame | None
     note: str = ""          # e.g. why the curves are missing
 

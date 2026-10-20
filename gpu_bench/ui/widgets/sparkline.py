@@ -8,7 +8,7 @@ the range itself is printed at the end so the line cannot exaggerate it.
 from collections import deque
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPaintEvent, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from gpu_bench.ui.style import LIGHT, Palette
@@ -66,7 +66,7 @@ class Sparkline(QWidget):
         label_w = QFontMetrics(self._label_font()).horizontalAdvance(self.range_label())
         return QRectF(1, 3, max(1.0, self.width() - label_w - 8), self.height() - 6)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent | None) -> None:
         if len(self._values) < 2:
             return
         t = self._theme
