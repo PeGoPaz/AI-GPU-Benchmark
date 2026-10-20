@@ -47,8 +47,12 @@ TEST(Sampler, ReadsAtRoughlyTheRequestedRate) {
 
     auto samples = run_for(sampler, 200ms);
 
-    EXPECT_GE(samples.size(), 40u);   // 100 at a perfect 2 ms
-    EXPECT_LE(samples.size(), 110u);  // and never a burst beyond it
+    // 100 at a perfect 2 ms. The floor only proves the thread keeps
+    // sampling: a shared macOS CI runner has delivered a third of the
+    // wake-ups, and late slots are skipped by design rather than caught up.
+    // The ceiling is the real contract — never a burst beyond the cadence.
+    EXPECT_GE(samples.size(), 20u);
+    EXPECT_LE(samples.size(), 110u);
     EXPECT_EQ(sampler.stats().reads, samples.size());
 }
 
