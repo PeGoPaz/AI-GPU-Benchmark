@@ -153,6 +153,17 @@ def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
     if stats['power_limited_pct'] is not None:
         metrics.append(("Time Power-Limited (%)", f"{stats['power_limited_pct']:.0f}"))
         metrics.append(("Time Thermal-Limited (%)", f"{stats['thermal_limited_pct']:.0f}"))
+    onsets = [f"{name} limit at {stats[key]:.0f} s" for name, key in
+              (("power", 'power_limit_onset_s'), ("thermal", 'thermal_limit_onset_s'))
+              if stats[key] is not None]
+    if onsets:
+        metrics.append(("Throttling Began (into timing)", ", ".join(onsets)))
+    if stats['clock_drift'] is not None:
+        metrics.append(("SM Clock Drift (first → last quarter)",
+                        f"{stats['clock_drift'] * 100:+.1f} %"))
+    if stats['throughput_drift'] is not None:
+        metrics.append(("Throughput Drift (first → last quarter)",
+                        f"{stats['throughput_drift'] * 100:+.1f} %"))
     if stats['pcie_gen_peak'] is not None and stats['pcie_width_peak'] is not None:
         metrics.append(("PCIe Link (peak)",
                         f"Gen{stats['pcie_gen_peak']:.0f} x{stats['pcie_width_peak']:.0f}"))

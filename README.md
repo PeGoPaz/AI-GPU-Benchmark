@@ -173,6 +173,8 @@ Fan speed and PCIe link follow the same rule. Fan duty cycle is reported as the 
 
 A falling SM clock on its own does not say whether the card hit its power limit or its temperature limit. NVML does: `nvmlDeviceGetCurrentClocksEventReasons` returns a bitmask of what is holding the clock down, polled with everything else. The dashboard names the active reasons (power cap, power brake, thermal, HW slowdown), the utilization plot shades power-limited and thermal-limited stretches behind the clock curve, and the summary reports the share of the timed window spent in each. Idle, sync-boost and clock-setting bits are ignored — they are the card resting or obeying a setting, not being held back. The bit values are written out from `nvml.h` rather than taken from pynvml, because NVML is renaming the constants (and the getter) while keeping the bits; drivers older than the rename are asked through the old `…ThrottleReasons` name.
 
+Two figures say when and how much. **Throttling began** is the first moment in the timed window that a power or thermal reason held for three polls in a row — one flagged poll is the driver trimming a transient, not a limit reached. **Drift** compares the last quarter of the timed window with the first, by median: the SM clock from the polls, and throughput from the step timestamps (rate is the inverse of step time). A card that boosts for a minute and then settles lower shows a negative drift even when its averages look healthy, and the two numbers side by side say whether the clock drop actually cost throughput.
+
 ---
 
 ## Architecture

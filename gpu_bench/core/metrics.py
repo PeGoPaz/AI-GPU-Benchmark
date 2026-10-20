@@ -203,6 +203,60 @@ def step_energy_stats(energies: np.ndarray, source: str | None) -> dict[str, Any
     }
 
 
+# Throttling has begun once its bits hold for this many polls in a row: a
+# single flagged poll is the driver trimming a transient, not a limit reached.
+ONSET_STREAK = 3
+
+
+def throttle_onset(window: pd.DataFrame, start: float, bits: int,
+                   streak: int = ONSET_STREAK) -> float | None:
+    """Seconds into the timed window at which throttling for these bits set in.
+
+    None when it never held for `streak` consecutive polls, and when the
+    driver reports no throttle reasons at all.
+    """
+    if 'throttle_reasons' not in window.columns or len(window) < streak:
+        return None
+    masks = window['throttle_reasons']
+    if not masks.notna().any():
+        return None
+    flags = (masks.fillna(0).astype('int64') & bits).astype(bool).to_numpy()
+    held = np.convolve(flags, np.ones(streak, dtype=int), mode='valid') == streak
+    if not held.any():
+        return None
+    return float(window['timestamp'].iloc[int(np.argmax(held))] - start)
+
+
+def quarter_drift(first: np.ndarray, last: np.ndarray) -> float | None:
+    """Relative change of the median from the first quarter to the last."""
+    if len(first) < 2 or len(last) < 2:
+        return None
+    before = float(np.median(first))
+    return float(np.median(last)) / before - 1 if before > 0 else None
+
+
+def drift_stats(window: pd.DataFrame, durations: np.ndarray) -> dict[str, float | None]:
+    """How much the SM clock and the step rate sagged over the timed window.
+
+    The first quarter against the last, by median: a card that holds its
+    boost clock for a minute and then settles lower shows it here even when
+    the averages look fine. Throughput comes from the step durations — rate
+    is their inverse — so the two figures can be read side by side.
+    """
+    stats: dict[str, float | None] = {'clock_drift': None, 'throughput_drift': None}
+    if 'sm_clock_mhz' in window.columns and len(window) >= 8:
+        t = window['timestamp'].to_numpy(dtype=float)
+        clock = window['sm_clock_mhz'].to_numpy(dtype=float)
+        q1, q3 = t[0] + (t[-1] - t[0]) / 4, t[-1] - (t[-1] - t[0]) / 4
+        stats['clock_drift'] = quarter_drift(clock[t <= q1], clock[t >= q3])
+    if len(durations) >= 8:
+        quarter = len(durations) // 4
+        slowdown = quarter_drift(durations[:quarter], durations[-quarter:])
+        if slowdown is not None:
+            stats['throughput_drift'] = 1 / (1 + slowdown) - 1
+    return stats
+
+
 def thermal_stats(df: pd.DataFrame, end: float | None) -> dict[str, Any]:
     """The fitted heating curve's numbers; all None when there is no curve."""
     fit = thermal.fit_run(df, end)
@@ -262,6 +316,10 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
     throttle_rows = window if len(window) else df
     stats['power_limited_pct'] = limited_share(throttle_rows, POWER_LIMIT_BITS)
     stats['thermal_limited_pct'] = limited_share(throttle_rows, THERMAL_LIMIT_BITS)
+    start = summary.get('measure_start')
+    for key, bits in (('power_limit_onset_s', POWER_LIMIT_BITS),
+                      ('thermal_limit_onset_s', THERMAL_LIMIT_BITS)):
+        stats[key] = throttle_onset(window, start, bits) if start is not None else None
 
     # The same window for the trace: loading draws little and would only
     # pull the mean down and the transient ratio up.
@@ -272,7 +330,9 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
     else:
         stats.update(transient_stats(None))
 
-    stats.update(step_time_stats(step_durations(summary)))
+    durations = step_durations(summary)
+    stats.update(step_time_stats(durations))
+    stats.update(drift_stats(window, durations))
     stats.update(step_energy_stats(*step_energy(summary, df, trace)))
     stats.update(thermal_stats(df, summary.get('measure_end')))
 

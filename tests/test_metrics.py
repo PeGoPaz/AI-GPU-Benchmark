@@ -263,3 +263,60 @@ def test_per_step_energy_reaches_the_stats(telemetry_sample):
 
     assert stats["step_energy_source"] == "counter"
     assert stats["step_energy_p50_j"] > 0
+
+
+def _polled(masks, start=100.0, **columns):
+    return pd.DataFrame({"timestamp": start + np.arange(len(masks), dtype=float),
+                         "throttle_reasons": pd.array(masks, dtype="Int64"), **columns})
+
+
+def test_throttling_onset_is_the_first_sustained_streak():
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP as P
+
+    window = _polled([0, 0, P, 0, 0, P, P, P, P, 0])
+
+    assert metrics.throttle_onset(window, 100.0, P) == 5.0
+
+
+def test_a_lone_flagged_poll_is_not_an_onset():
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP as P
+
+    assert metrics.throttle_onset(_polled([0, P, 0, P, 0, 0]), 100.0, P) is None
+
+
+def test_no_onset_when_the_driver_reports_no_reasons():
+    assert metrics.throttle_onset(_polled([None] * 6), 100.0, 0xFF) is None
+    assert metrics.throttle_onset(pd.DataFrame({"timestamp": [1.0]}), 0.0, 0xFF) is None
+
+
+def test_clock_and_throughput_drift_compare_the_quarters():
+    clock = [2600.0] * 10 + [2500.0] * 10 + [2400.0] * 10
+    window = _polled([0] * 30, sm_clock_mhz=clock)
+    durations = np.array([1.0] * 10 + [1.1] * 10)
+
+    stats = metrics.drift_stats(window, durations)
+
+    assert stats["clock_drift"] == pytest.approx(2400 / 2600 - 1)
+    assert stats["throughput_drift"] == pytest.approx(1 / 1.1 - 1)
+
+
+def test_drift_needs_enough_of_a_window():
+    stats = metrics.drift_stats(_polled([0] * 4, sm_clock_mhz=[2600.0] * 4), np.ones(4))
+
+    assert stats == {"clock_drift": None, "throughput_drift": None}
+
+
+def test_onset_and_drift_reach_the_summary(telemetry_sample):
+    from gpu_bench.core.telemetry import THROTTLE_SW_POWER_CAP as P
+    from gpu_bench.utils.display import summary_rows
+
+    df = _df(telemetry_sample, n=12)
+    df["throttle_reasons"] = [0, 0, 0, 0, P, P, P, P, P, P, P, P]
+    summary = {"total_steps": 8, "requested_steps": 8, "elapsed_time_sec": 10.0,
+               "steps_per_sec": 0.8, "measure_start": 101.0, "measure_end": 111.0,
+               "step_times": [102.0, 103.0, 104.0, 105.0, 106.2, 107.4, 108.6, 109.8]}
+
+    rows = dict(summary_rows(df, summary))
+
+    assert rows["Throttling Began (into timing)"] == "power limit at 3 s"
+    assert rows["Throughput Drift (first → last quarter)"] == "-16.7 %"
