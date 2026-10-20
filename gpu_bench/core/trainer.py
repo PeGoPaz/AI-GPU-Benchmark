@@ -305,6 +305,13 @@ class ProgressCallbackLogic:
                 f"Warm-up done after {self.worker.warmup_steps} steps — timing "
                 f"the next {self.worker.steps}..."
             )
+        elif state.global_step > self.worker.warmup_steps:
+            # The end of a timed step, as the host sees it. CUDA runs behind
+            # the host, but with logging_steps=1 the Trainer reads every
+            # step's loss back right after this callback, so the host is
+            # never more than one step ahead: the stamps trail the GPU by
+            # less than a step, and their spacing is the step time.
+            self.worker.step_times.append(time.time())
 
         self.worker.progress_updated.emit(state.global_step)
 
@@ -353,6 +360,10 @@ class TrainerWorker(QThread):
         self.seq_len = seq_len
         self.gradient_checkpointing = gradient_checkpointing
         self.completed_steps = 0
+        # Wall-clock end of every timed step. With measure_start in front
+        # they are the edges of each step: its duration, and the interval
+        # its energy is integrated over.
+        self.step_times: list[float] = []
         # Stays None until the timed window opens, which is how a run stopped
         # during warm-up is told apart from one that never started timing.
         self.measure_start: float | None = None
@@ -509,6 +520,7 @@ class TrainerWorker(QThread):
                 # cut to exactly the measured steps (energy per token).
                 "measure_start": self.measure_start,
                 "measure_end": measure_end,
+                "step_times": list(self.step_times),
             }
 
             if was_aborted:

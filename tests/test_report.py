@@ -90,3 +90,12 @@ def test_report_without_the_native_sampler_says_so(telemetry_sample):
 
     assert r["power_sampler"]["active"] is False
     assert r["results"]["native_peak_power_w"] is None
+
+
+def test_report_keeps_the_step_boundaries(telemetry_sample):
+    summary = {**SUMMARY, "step_times": [103.0, 104.5, 106.0]}
+
+    r = report.build_report(_df(telemetry_sample), summary, DEVICE)
+
+    assert r["steps"] == {"start": 102.0, "ends": [103.0, 104.5, 106.0]}
+    assert r["results"]["step_time_p50_s"] == 1.5

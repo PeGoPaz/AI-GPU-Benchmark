@@ -139,6 +139,7 @@ Steps/sec alone does not compare across runs — a step at batch 1 and 512 token
 | Transient ratio | instant peak ÷ instant mean — how far the spikes rise above the steady draw |
 | Native sampling | samples per second, and how many of them were new readings. NVML refreshes less often than it can be asked, so the second number is the trace's real resolution — reported rather than assumed |
 | Energy, instant trace | the trace integrated over the timed window: a cross-check on the card's energy counter |
+| Step time p50 / p99, jitter | from a timestamp the trainer takes at the end of every timed step: the median and 99th-percentile step, and their coefficient of variation. An average hides a run whose every twentieth step stalls; the tail does not. The stamps go into the report too (`steps`), so every per-step figure can be recomputed from it |
 
 The timer does not start with the run. Warm-up steps (10 by default) are executed first and excluded from the measurement, because the opening steps carry lazy weight loading and CUDA kernel compilation — real work, but not the steady-state rate the benchmark is trying to report. Stopping during warm-up reports no throughput at all rather than a number derived from the warm-up itself.
 

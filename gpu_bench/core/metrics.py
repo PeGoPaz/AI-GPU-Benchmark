@@ -108,6 +108,37 @@ def transient_stats(trace: pd.DataFrame | None) -> dict[str, Any]:
     }
 
 
+def step_durations(summary: dict[str, Any]) -> np.ndarray:
+    """Seconds each timed step took, from the trainer's step-end stamps.
+
+    The first step is measured from the opening of the timed window, so the
+    durations add up to the window exactly. Empty for summaries from before
+    the stamps existed, and for a run stopped during warm-up.
+    """
+    ends = summary.get('step_times') or []
+    start = summary.get('measure_start')
+    if start is None or not ends:
+        return np.empty(0)
+    return np.diff(np.concatenate([[start], ends]))
+
+
+def step_time_stats(durations: np.ndarray) -> dict[str, float | None]:
+    """Median and p99 step time, and the jitter as a coefficient of variation.
+
+    The average hides what the distribution shows: a run whose every
+    twentieth step takes twice as long — a data-loader stall, a clock dip —
+    averages out to a plausible number. The p99 and the CV do not.
+    """
+    if len(durations) < 2:
+        return dict.fromkeys(('step_time_p50_s', 'step_time_p99_s', 'step_time_cv'))
+    mean = float(durations.mean())
+    return {
+        'step_time_p50_s': float(np.median(durations)),
+        'step_time_p99_s': float(np.percentile(durations, 99)),
+        'step_time_cv': float(durations.std(ddof=1)) / mean if mean > 0 else None,
+    }
+
+
 def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     """max/min/mean of an optional column, None when it was never reported."""
     if column not in df.columns or not df[column].notna().any():
@@ -161,6 +192,8 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
         stats.update(transient_stats(trace_window if len(trace_window) else trace))
     else:
         stats.update(transient_stats(None))
+
+    stats.update(step_time_stats(step_durations(summary)))
 
     tokens_per_step = summary.get('tokens_per_step')
     elapsed = summary.get('elapsed_time_sec') or 0.0

@@ -1,4 +1,5 @@
 """Derived numbers: tokens/sec, estimated TFLOPS and energy per token."""
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -175,3 +176,30 @@ def test_no_trace_means_no_transient_figures(telemetry_sample):
 
     assert stats["native_peak_power_w"] is None
     assert stats["native_update_hz"] is None
+
+
+def test_step_durations_start_at_the_timed_window():
+    durations = metrics.step_durations({"measure_start": 10.0,
+                                        "step_times": [11.0, 12.5, 13.0]})
+
+    assert list(durations) == [1.0, 1.5, 0.5]
+
+
+def test_step_durations_are_empty_without_stamps():
+    assert len(metrics.step_durations({"measure_start": 10.0})) == 0
+    assert len(metrics.step_durations({"measure_start": None, "step_times": [1.0]})) == 0
+
+
+def test_step_time_stats_catch_the_slow_tail():
+    durations = np.array([1.0] * 99 + [3.0])
+
+    stats = metrics.step_time_stats(durations)
+
+    assert stats["step_time_p50_s"] == 1.0
+    assert stats["step_time_p99_s"] > 1.0
+    assert 0.1 < stats["step_time_cv"] < 0.3
+
+
+def test_step_time_stats_need_two_steps():
+    assert metrics.step_time_stats(np.array([1.0])) == dict.fromkeys(
+        ("step_time_p50_s", "step_time_p99_s", "step_time_cv"))

@@ -70,5 +70,9 @@ def build_report(df: pd.DataFrame, summary: dict[str, Any],
         },
         "power_sampler": sampler or {"active": False, "detail": "unknown"},
         "loss": {"steps": list(steps), "values": list(values)},
+        # Step boundaries, unix seconds: enough to recompute every per-step
+        # figure from the report and the power trace alone.
+        "steps": {"start": summary.get("measure_start"),
+                  "ends": list(summary.get("step_times") or [])},
         "files": {},
     }

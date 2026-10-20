@@ -19,6 +19,7 @@ class _FakeWorker:
         self.warmup_steps = warmup_steps
         self.steps = steps
         self.measure_start = None
+        self.step_times = []
         self.progress_updated = types.SimpleNamespace(emit=lambda *_: None)
         self.status_updated = types.SimpleNamespace(emit=lambda *_: None)
         self.losses = []
@@ -83,9 +84,14 @@ def run_worker(steps=150, stop_after=None, elapsed=20.0, warmup_elapsed=5.0,
                     break
 
     # Ticks in the order run() reads them: start, warm-up boundary, finish.
-    ticks = iter([0.0, warmup_elapsed, warmup_elapsed + elapsed]
-                 if worker.warmup_steps else [0.0, elapsed])
-    last = warmup_elapsed + elapsed
+    # The timed steps stamp their ends too; those, and the finish, all read
+    # the end of the window, which leaves the timed span exactly `elapsed`.
+    if worker.warmup_steps:
+        ticks = iter([0.0, warmup_elapsed])
+        last = warmup_elapsed + elapsed
+    else:
+        ticks = iter([0.0])
+        last = elapsed
 
     def clock_now():
         nonlocal last
@@ -683,3 +689,31 @@ def test_trainer_callback_runs_our_logic_over_hfs_hooks():
 
     assert cb.worker.completed_steps == 3
     assert cb.on_train_begin() == "hf default"
+
+
+def test_callback_stamps_the_end_of_every_timed_step():
+    clock = iter(float(t) for t in range(100, 200))
+    with mock.patch.object(trainer_module, "time",
+                           types.SimpleNamespace(time=lambda: next(clock))):
+        worker, _ = _drive_callback(15, warmup_steps=10)
+
+    assert worker.measure_start == 100.0          # stamped at the boundary
+    assert worker.step_times == [101.0, 102.0, 103.0, 104.0, 105.0]
+
+
+def test_no_warmup_stamps_from_the_first_step():
+    worker, _ = _drive_callback(4, warmup_steps=0)
+
+    assert len(worker.step_times) == 4
+
+
+def test_stopped_run_stamps_only_the_steps_it_ran():
+    worker, _ = _drive_callback(50, stop_at=13, warmup_steps=10)
+
+    assert len(worker.step_times) == worker.completed_steps - worker.warmup_steps
+
+
+def test_summary_carries_the_step_stamps():
+    summary = run_worker(steps=30, warmup_steps=5)["summary"]
+
+    assert len(summary["step_times"]) == summary["total_steps"] == 30

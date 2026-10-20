@@ -48,3 +48,19 @@ def test_peak_power_prefers_the_instant_trace(telemetry_sample):
 
     assert peak.value == "330"
     assert peak.caption.startswith("instant")
+
+
+def test_step_timing_rows_appear_with_stamps(telemetry_sample):
+    summary = {**FULL, "measure_start": 100.0,
+               "step_times": [101.0, 102.0, 103.5, 104.5]}
+
+    rows = dict(display.summary_rows(_df(telemetry_sample), summary))
+
+    assert rows["Step Time p50 / p99 (s)"].startswith("1.000 / 1.4")
+    assert rows["Step-Time Jitter (CV)"].endswith(" %")
+
+
+def test_no_step_rows_without_stamps(telemetry_sample):
+    rows = dict(display.summary_rows(_df(telemetry_sample), FULL))
+
+    assert "Step Time p50 / p99 (s)" not in rows
