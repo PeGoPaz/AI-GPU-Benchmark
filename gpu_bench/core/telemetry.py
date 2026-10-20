@@ -191,10 +191,10 @@ def read_device_info(handle: Handle, gpu_name: str) -> dict[str, Any]:
     }
 
 
-def read_gpu_temperature(index: int = 0) -> float | None:
-    """One core temperature reading outside the poll loop, None without NVML.
+def read_once(getter: Callable[[Handle], _T], index: int = 0) -> _T | None:
+    """One reading outside the poll loop, None without NVML or when it fails.
 
-    For the pause between runs, when no TelemetryWorker is running. NVML
+    For the moments between runs, when no TelemetryWorker is running. NVML
     counts initialisations, so this is safe alongside one that is.
     """
     try:
@@ -202,8 +202,7 @@ def read_gpu_temperature(index: int = 0) -> float | None:
     except Exception:
         return None
     try:
-        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        return float(pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU))
+        return getter(pynvml.nvmlDeviceGetHandleByIndex(index))
     except Exception:
         return None
     finally:
@@ -211,6 +210,17 @@ def read_gpu_temperature(index: int = 0) -> float | None:
             pynvml.nvmlShutdown()
         except Exception:
             pass
+
+
+def read_gpu_temperature(index: int = 0) -> float | None:
+    """The core temperature right now: the cool-down between runs waits on it."""
+    return read_once(lambda h: float(
+        pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU)), index)
+
+
+def read_vram_total_mib(index: int = 0) -> float | None:
+    """The card's VRAM: a sweep leaves out what would not fit before running it."""
+    return read_once(lambda h: float(pynvml.nvmlDeviceGetMemoryInfo(h).total / 2**20), index)
 
 
 class TelemetryWorker(QThread):

@@ -112,6 +112,15 @@ Back to back, every run after the first would also start on a card the last one 
 gpu-bench --headless --preset quick --repeat 5 --cooldown 120
 ```
 
+`--sweep` runs every combination of the values given — model, precision, batch size, sequence length, checkpointing — on top of the preset and flags, each one a series of its own with `--repeat`, all into one `sweep_<timestamp>/` directory:
+
+```bash
+gpu-bench --headless --preset standard --steps 100 --repeat 3 --cooldown 120 \
+    --sweep batch-size=1,2,4 seq-len=256,512 precision=bf16,int4
+```
+
+Before anything runs, combinations whose weights alone would not fit the card's VRAM are listed and skipped — the same estimate as the window's fit hint. One that still runs out of memory at run time (activations grow with batch and sequence length; the estimate counts weights) is marked *out of memory* and the sweep carries on with the next. It ends with a table of every combination's tokens/sec, tokens/J and peak temperature; Ctrl+C ends it after the current run, table included.
+
 ---
 
 ## How It Works
@@ -195,7 +204,7 @@ gpu_bench/
   __init__.py                  — the version, in one place
   __main__.py                  — entry point: the window, or a headless run with --headless
   cli.py                       — headless mode: argument parsing, a run wired to stdout
-  batch.py                     — several headless runs in a row: --repeat, with --cooldown between them, combined into one series
+  batch.py                     — several headless runs in a row: --repeat, --sweep over a grid of workloads, --cooldown between runs
   ui/
     main_window.py             — GUI layout, thread wiring, summary table, console log
     live_charts.py             — pyqtgraph live charts, fed one snapshot at a time

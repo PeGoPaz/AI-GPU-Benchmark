@@ -303,7 +303,7 @@ def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_
     """A Series of threadless runs, driven on a local event loop until done."""
     from PyQt6.QtCore import QEventLoop, QTimer
 
-    from gpu_bench.batch import Series
+    from gpu_bench.batch import Cooldown, Series
 
     FakeTelemetry.samples = [telemetry_sample(i) for i in range(6)]
     ScriptedTrainer.total = 20
@@ -320,7 +320,10 @@ def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_
             run.start = lambda r=run: (series.request_stop(), cli.HeadlessRun.start(r))
         return run
 
-    series = Series(make_run, repeat, str(tmp_path), out=out, **series_kwargs)
+    cooldown = None
+    if series_kwargs:
+        cooldown = Cooldown(series_kwargs.pop("cooldown_s"), out, **series_kwargs)
+    series = Series(make_run, repeat, str(tmp_path), out=out, cooldown=cooldown)
     codes = []
     loop = QEventLoop()
     series.done.connect(lambda code: (codes.append(code), loop.quit()))
@@ -429,3 +432,129 @@ def test_gpu_temperature_without_nvml_is_none(monkeypatch):
     monkeypatch.setattr(telemetry.pynvml, "nvmlInit", no_driver)
 
     assert telemetry.read_gpu_temperature() is None
+
+
+# --- sweeps (--sweep) -------------------------------------------------------------
+
+def test_sweep_axes_parse_like_the_flags():
+    args = _parse("--sweep", "batch-size=1,2,4", "seq_len=256,512", "precision=bf16,int4",
+                  "checkpointing=on,off")
+
+    assert args.sweep["batch_size"] == [1, 2, 4]
+    assert args.sweep["seq_len"] == [256, 512]
+    assert [p.label for p in args.sweep["precision"]] == ["BF16", "INT4 (NF4)"]
+    assert args.sweep["gradient_checkpointing"] == [True, False]
+
+
+@pytest.mark.parametrize("bad", ["batch-size", "colour=red", "seq-len=300", "batch=0",
+                                 "checkpointing=maybe", "model=qwen2.5", "batch="])
+def test_bad_sweep_axes_are_refused(bad, capsys):
+    with pytest.raises(SystemExit):
+        _parse("--sweep", bad)
+
+
+def test_an_axis_cannot_be_swept_twice(capsys):
+    with pytest.raises(SystemExit):
+        _parse("--sweep", "batch=1,2", "batch-size=4")
+
+    assert "swept twice" in capsys.readouterr().err
+
+
+def test_grid_varies_the_last_axis_fastest():
+    from gpu_bench.batch import grid
+
+    configs = grid({"steps": 10}, {"batch_size": [1, 2], "seq_len": [256, 512]})
+
+    assert [(c["batch_size"], c["seq_len"]) for c in configs] == [
+        (1, 256), (1, 512), (2, 256), (2, 512)]
+    assert all(c["steps"] == 10 for c in configs)
+
+
+def test_what_cannot_fit_is_skipped_before_running():
+    seven_b = cli.resolve(trainer_module.MODELS, "qwen2.5-7b", "model")
+    configs = [{"model": seven_b, "precision": p} for p in
+               (cli.resolve(trainer_module.PRECISIONS, "bf16", "precision"),
+                cli.resolve(trainer_module.PRECISIONS, "int4", "precision"))]
+
+    runnable, skipped = cli.split_by_fit(configs, vram_total_mib=8188)
+
+    assert [c["precision"].label for c in runnable] == ["INT4 (NF4)"]
+    assert "GiB of 8.0 GiB" in skipped[0][1]
+    assert cli.split_by_fit(configs, None) == (configs, [])
+
+
+def _run_sweep(tmp_path, telemetry_sample, axes, oom_batch=None, stop_in=None, repeat=1):
+    from PyQt6.QtCore import QEventLoop, QTimer
+
+    from gpu_bench.batch import Sweep, grid
+
+    FakeTelemetry.samples = [telemetry_sample(i) for i in range(6)]
+    ScriptedTrainer.total = 20
+    out = io.StringIO()
+    made = []
+
+    def make_run(workload, output_dir):
+        ScriptedTrainer.outcome = "error" if workload["batch_size"] == oom_batch else "finish"
+        run = cli.HeadlessRun(workload, output_dir, out=out, trainer_cls=ScriptedTrainer,
+                              telemetry_cls=FakeTelemetry)
+        made.append(run)
+        if stop_in is not None and len(made) == stop_in:
+            run.start = lambda r=run: (sweep.request_stop(), cli.HeadlessRun.start(r))
+        return run
+
+    configs = grid(cli.workload_from_args(_parse()), axes)
+    sweep = Sweep(configs, list(axes), make_run, repeat, str(tmp_path), out=out)
+    codes = []
+    loop = QEventLoop()
+    sweep.done.connect(lambda code: (codes.append(code), loop.quit()))
+    QTimer.singleShot(0, sweep.start)
+    QTimer.singleShot(10000, loop.quit)
+    loop.exec()
+    return sweep, codes, out.getvalue(), made
+
+
+def test_sweep_runs_every_configuration_into_its_own_directory(qapp, tmp_path,
+                                                                 telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [1, 2], "seq_len": [256, 512]})
+
+    assert codes == [0]
+    assert len(made) == 4
+    assert "Configuration 4 of 4: batch 2, 512 tokens" in out
+    assert [r["status"] for r in sweep.results] == ["ok"] * 4
+    assert sweep.output_dir.startswith(str(tmp_path / "sweep_"))
+    assert len(list((tmp_path / sweep.output_dir).glob("report_*.json"))) == 4
+
+
+def test_out_of_memory_marks_the_configuration_and_the_sweep_goes_on(qapp, tmp_path,
+                                                                       telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [1, 8, 2]}, oom_batch=8)
+
+    assert codes == [0]
+    assert [r["status"] for r in sweep.results] == ["ok", "out of memory", "ok"]
+    assert "batch 8" in out and "out of memory" in out
+
+
+def test_each_configuration_is_a_series_with_repeat(qapp, tmp_path, telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [1, 2]}, repeat=2)
+
+    assert len(made) == 4
+    assert all(r["record"]["metrics"]["tokens_per_sec"]["n"] == 2 for r in sweep.results)
+
+
+def test_ctrl_c_ends_the_sweep_after_the_current_run(qapp, tmp_path, telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [1, 2, 4]}, stop_in=2)
+
+    assert codes == [cli.EXIT_INTERRUPTED]
+    assert len(made) == 2
+    assert "2 of 3 configurations run" in out
+
+
+def test_a_sweep_where_nothing_finishes_fails(qapp, tmp_path, telemetry_sample):
+    sweep, codes, out, made = _run_sweep(tmp_path, telemetry_sample,
+                                         {"batch_size": [8]}, oom_batch=8)
+
+    assert codes == [1]

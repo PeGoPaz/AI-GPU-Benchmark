@@ -385,3 +385,9 @@ def test_one_off_temperature_reading_initialises_and_shuts_down(monkeypatch):
 
     assert telemetry.read_gpu_temperature() == 72.0
     assert calls == ["init", "shutdown"]
+
+
+def test_one_off_vram_reading(monkeypatch):
+    _patch_nvml(monkeypatch)
+
+    assert telemetry.read_vram_total_mib() == 24 * 1024

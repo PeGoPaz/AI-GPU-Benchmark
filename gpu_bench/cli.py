@@ -16,8 +16,8 @@ from typing import Any, TextIO, TypeVar
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
 from gpu_bench import __version__
-from gpu_bench.batch import EXIT_INTERRUPTED, Series
-from gpu_bench.core.telemetry import TelemetryWorker
+from gpu_bench.batch import EXIT_INTERRUPTED, Cooldown, Series, Sweep, grid
+from gpu_bench.core.telemetry import TelemetryWorker, read_vram_total_mib
 from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
     MODELS,
@@ -29,6 +29,7 @@ from gpu_bench.core.trainer import (
     TrainerWorker,
     WorkloadPreset,
     estimate_weights_gib,
+    fits_in_vram,
 )
 from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
 from gpu_bench.utils.logger import BenchmarkLogger, ExportPaths
@@ -117,10 +118,70 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--repeat", type=_at_least(1), default=1, metavar="N",
                        help="run the workload N times and report the mean and spread, "
                             "outliers dropped (default: 1)")
+    batch.add_argument("--sweep", nargs="+", type=parse_axis, action=_SweepAxes,
+                       default={}, metavar="KEY=V1,V2",
+                       help="run every combination, e.g. --sweep batch-size=1,2,4 "
+                            "seq-len=256,512 precision=bf16,int4; with --repeat, each "
+                            "combination is a series")
     batch.add_argument("--cooldown", type=_at_least(0), default=0, metavar="SECONDS",
                        help="between runs, wait up to this long for the GPU to cool back "
                             "to its starting temperature (default: 0, no wait)")
     return parser
+
+
+# What --sweep can vary, and the spellings it accepts for each.
+_SWEEP_KEYS = {
+    "model": "model", "precision": "precision",
+    "batch_size": "batch_size", "batch": "batch_size",
+    "seq_len": "seq_len", "seq": "seq_len",
+    "gradient_checkpointing": "gradient_checkpointing", "checkpointing": "gradient_checkpointing",
+}
+_BOOLEANS = {"on": True, "true": True, "yes": True, "1": True,
+             "off": False, "false": False, "no": False, "0": False}
+
+
+def parse_axis(text: str) -> tuple[str, list[Any]]:
+    """'batch-size=1,2,4' → ('batch_size', [1, 2, 4]); values checked like the flags."""
+    name, sep, values = text.partition("=")
+    key = _SWEEP_KEYS.get(name.strip().lower().replace("-", "_"))
+    if not sep or key is None:
+        raise argparse.ArgumentTypeError(
+            f"'{text}' is not KEY=V1,V2,... with KEY one of "
+            "model, precision, batch-size, seq-len, gradient-checkpointing")
+    items = [v.strip() for v in values.split(",") if v.strip()]
+    if not items:
+        raise argparse.ArgumentTypeError(f"no values given for {name}")
+    parsed: list[Any] = []
+    for item in items:
+        if key == "model":
+            parsed.append(resolve(MODELS, item, "model"))
+        elif key == "precision":
+            parsed.append(resolve(PRECISIONS, item, "precision"))
+        elif key == "batch_size":
+            parsed.append(_at_least(1)(item))
+        elif key == "seq_len":
+            if not item.isdigit() or int(item) not in SEQ_LENGTHS:
+                raise argparse.ArgumentTypeError(
+                    f"sequence length {item} is not one of {', '.join(map(str, SEQ_LENGTHS))}")
+            parsed.append(int(item))
+        elif item.lower() in _BOOLEANS:
+            parsed.append(_BOOLEANS[item.lower()])
+        else:
+            raise argparse.ArgumentTypeError(f"'{item}' is not on or off")
+    return key, parsed
+
+
+class _SweepAxes(argparse.Action):
+    """Collects --sweep's KEY=values items into one {key: values} dict."""
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+                 values: Any, option_string: str | None = None) -> None:
+        axes: dict[str, list[Any]] = {}
+        for key, items in values:
+            if key in axes:
+                raise argparse.ArgumentError(self, f"{key} is swept twice")
+            axes[key] = items
+        setattr(namespace, self.dest, axes)
 
 
 def workload_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -150,6 +211,8 @@ def gui_only_misuse(args: argparse.Namespace) -> str | None:
         given.append("--repeat")
     if args.cooldown:
         given.append("--cooldown")
+    if args.sweep:
+        given.append("--sweep")
     if not args.headless and given:
         return (f"{', '.join(given)} only apply with --headless; "
                 "the window has its own Workload panel.")
@@ -196,6 +259,7 @@ class HeadlessRun(QObject):
         # The finished run's report and where it was written, for a series.
         self.report: dict[str, Any] | None = None
         self.paths: ExportPaths | None = None
+        self.error: str | None = None
         self.logger = BenchmarkLogger()
         self._device: dict[str, Any] | None = None
         self._sampler_status: dict[str, Any] | None = None
@@ -324,6 +388,7 @@ class HeadlessRun(QObject):
 
     @pyqtSlot(str)
     def _on_error(self, message: str) -> None:
+        self.error = message
         self._print(f"\nERROR: {message}")
         df = self.logger.stop()
         if df is not None:
@@ -343,6 +408,27 @@ class HeadlessRun(QObject):
         self.done.emit(code)
 
 
+def split_by_fit(configs: list[dict[str, Any]], vram_total_mib: float | None
+                 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+    """Separates the configurations whose weights alone would not fit.
+
+    The same estimate as the window's fit hint; without a VRAM reading
+    nothing is skipped, and an out-of-memory failure is caught at run time
+    instead.
+    """
+    if vram_total_mib is None:
+        return configs, []
+    runnable, skipped = [], []
+    for config in configs:
+        if fits_in_vram(config["model"], config["precision"], vram_total_mib):
+            runnable.append(config)
+        else:
+            need = estimate_weights_gib(config["model"], config["precision"])
+            skipped.append((config, f"weights need {need:.1f} GiB of "
+                                    f"{vram_total_mib / 1024:.1f} GiB"))
+    return runnable, skipped
+
+
 def run_headless(args: argparse.Namespace) -> int:
     if args.list:
         print_registry()
@@ -351,12 +437,17 @@ def run_headless(args: argparse.Namespace) -> int:
     app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
     workload = workload_from_args(args)
 
-    def make_run() -> HeadlessRun:
-        return HeadlessRun(workload, args.output_dir)
-
-    run: HeadlessRun | Series = (Series(make_run, args.repeat, args.output_dir,
-                                        cooldown_s=args.cooldown)
-                                 if args.repeat > 1 else make_run())
+    cooldown = Cooldown(args.cooldown)
+    run: HeadlessRun | Series | Sweep
+    if args.sweep:
+        configs, skipped = split_by_fit(grid(workload, args.sweep), read_vram_total_mib())
+        run = Sweep(configs, list(args.sweep), HeadlessRun, args.repeat, args.output_dir,
+                    cooldown=cooldown, skipped=skipped)
+    elif args.repeat > 1:
+        run = Series(lambda: HeadlessRun(workload, args.output_dir), args.repeat,
+                     args.output_dir, cooldown=cooldown)
+    else:
+        run = HeadlessRun(workload, args.output_dir)
     run.done.connect(app.exit)
 
     # Python only runs signal handlers between bytecodes, and Qt's event loop
