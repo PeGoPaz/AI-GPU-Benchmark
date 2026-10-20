@@ -172,6 +172,53 @@ def draw_loss(ax: Axes, steps: list[int], losses: list[float],
         ax.legend(loc='upper right')
 
 
+def draw_step_durations(ax: Axes, durations: np.ndarray) -> None:
+    """Every timed step's duration in order, with the median for reference.
+
+    A drift upwards is the card throttling as it heats; isolated spikes are
+    stalls — the data loader, the host, a checkpoint write.
+    """
+    steps = np.arange(1, len(durations) + 1)
+    ax.plot(steps, durations, color=POWER_COLOR, linewidth=1, label='Step time')
+    ax.axhline(float(np.median(durations)), color='grey', linestyle=':', linewidth=1,
+               label='Median')
+    ax.set_xlabel('Timed step')
+    ax.set_ylabel('Seconds')
+    ax.set_title('Step Duration')
+    ax.grid(True, alpha=0.2)
+    ax.legend(loc='upper right')
+
+
+def draw_step_energy(ax: Axes, energies: np.ndarray, source: str | None = None) -> None:
+    """How the energy of a step is distributed: one narrow peak is a steady run."""
+    ax.hist(energies, bins=min(40, max(5, len(energies) // 5)), color=TEMP_COLOR, alpha=0.8)
+    ax.axvline(float(np.median(energies)), color='grey', linestyle=':', linewidth=1)
+    ax.set_xlabel(f"Joules per step{f' ({source})' if source else ''}")
+    ax.set_ylabel('Steps')
+    ax.set_title('Energy per Step')
+    ax.grid(True, alpha=0.2)
+
+
+def build_step_figure(durations: np.ndarray, energies: np.ndarray,
+                      source: str | None = None) -> Figure | None:
+    """Step duration over the run beside the per-step energy histogram.
+
+    None without step stamps. Without a fine enough energy reading the
+    duration plot stands alone.
+    """
+    if len(durations) < 2:
+        return None
+    fig = Figure(figsize=(10, 3.2))
+    if len(energies) >= 2:
+        left, right = fig.subplots(1, 2, gridspec_kw={'width_ratios': [3, 2]})
+        draw_step_durations(left, durations)
+        draw_step_energy(right, energies, source)
+    else:
+        draw_step_durations(fig.add_subplot(111), durations)
+    fig.tight_layout()
+    return fig
+
+
 def build_report_figure(df: pd.DataFrame, trace: pd.DataFrame | None = None) -> Figure:
     """Both panels stacked, as written to the exported PNG.
 

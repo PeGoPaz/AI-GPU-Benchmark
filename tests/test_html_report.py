@@ -81,3 +81,14 @@ def test_inline_svg_has_no_xml_prologue():
     svg = figure_svg(fig)
     assert svg.startswith("<svg")
     assert "<?xml" not in svg
+
+
+def test_step_panel_appears_with_step_stamps(telemetry_sample):
+    page = _page(telemetry_sample, measure_start=100.0, step_times=[104.0, 108.0])
+
+    assert "<h2>Steps</h2>" in page
+    assert "Energy per Step" in page
+
+
+def test_no_step_panel_without_stamps(telemetry_sample):
+    assert "<h2>Steps</h2>" not in _page(telemetry_sample)

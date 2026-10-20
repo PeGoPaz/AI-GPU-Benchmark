@@ -74,6 +74,11 @@ def summary_rows(df: pd.DataFrame, summary: dict[str, Any],
                         f"{stats['step_time_p50_s']:.3f} / {stats['step_time_p99_s']:.3f}"))
         if stats['step_time_cv'] is not None:
             metrics.append(("Step-Time Jitter (CV)", f"{stats['step_time_cv'] * 100:.1f} %"))
+    if stats['step_energy_p50_j'] is not None:
+        metrics.append((f"Energy per Step p50 / p95 (J, {stats['step_energy_source']})",
+                        f"{stats['step_energy_p50_j']:.1f} / {stats['step_energy_p95_j']:.1f}"))
+        if stats['step_energy_cv'] is not None:
+            metrics.append(("Step-Energy Spread (CV)", f"{stats['step_energy_cv'] * 100:.1f} %"))
 
     # Throughput and energy need the timed window, which a run stopped
     # during warm-up never opened.

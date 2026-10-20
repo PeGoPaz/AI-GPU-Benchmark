@@ -139,6 +139,69 @@ def step_time_stats(durations: np.ndarray) -> dict[str, float | None]:
     }
 
 
+def _cumulative_joules(seconds: np.ndarray, watts: np.ndarray) -> np.ndarray:
+    """Energy drawn from the first sample up to each sample (trapezoid rule)."""
+    return np.concatenate([[0.0], np.cumsum((watts[1:] + watts[:-1]) / 2 * np.diff(seconds))])
+
+
+# A source is used for per-step energy only if it samples at least this many
+# times per median step; coarser, and the split between neighbouring steps
+# would be interpolation rather than measurement.
+_SAMPLES_PER_STEP = 4
+
+
+def step_energy(summary: dict[str, Any], df: pd.DataFrame,
+                trace: pd.DataFrame | None = None) -> tuple[np.ndarray, str | None]:
+    """Joules each timed step drew, and which reading they were taken from.
+
+    The energy curve is read at every step boundary and differenced. The
+    native trace is preferred — at 500 Hz it resolves even sub-second steps
+    — then the card's energy counter and finally the 250 ms power polls,
+    each only if it is fine-grained enough for the steps at hand and spans
+    the whole timed window. Empty when none is.
+    """
+    durations = step_durations(summary)
+    if len(durations) == 0:
+        return np.empty(0), None
+    edges = np.concatenate([[summary['measure_start']], summary['step_times']])
+    resolution = float(np.median(durations)) / _SAMPLES_PER_STEP
+
+    candidates: list[tuple[str, np.ndarray, np.ndarray]] = []
+    if trace is not None and len(trace) >= 2:
+        t = trace['timestamp'].to_numpy(dtype=float)
+        candidates.append(("instant trace", t,
+                           _cumulative_joules(t, trace['power_w'].to_numpy(dtype=float))))
+    if 'energy_mj' in df.columns:
+        counter = df[['timestamp', 'energy_mj']].dropna()
+        if len(counter) >= 2:
+            candidates.append(("counter", counter['timestamp'].to_numpy(dtype=float),
+                               counter['energy_mj'].to_numpy(dtype=float) / 1000.0))
+    if len(df) >= 2:
+        t = df['timestamp'].to_numpy(dtype=float)
+        candidates.append(("power samples", t,
+                           _cumulative_joules(t, df['power_w'].to_numpy(dtype=float))))
+
+    for source, seconds, joules in candidates:
+        covers = seconds[0] <= edges[0] and seconds[-1] >= edges[-1]
+        if covers and float(np.median(np.diff(seconds))) <= resolution:
+            return np.diff(np.interp(edges, seconds, joules)), source
+    return np.empty(0), None
+
+
+def step_energy_stats(energies: np.ndarray, source: str | None) -> dict[str, Any]:
+    """Median and p95 energy per step, its spread, and where it came from."""
+    if len(energies) < 2:
+        return dict.fromkeys(('step_energy_p50_j', 'step_energy_p95_j',
+                              'step_energy_cv', 'step_energy_source'))
+    mean = float(energies.mean())
+    return {
+        'step_energy_p50_j': float(np.median(energies)),
+        'step_energy_p95_j': float(np.percentile(energies, 95)),
+        'step_energy_cv': float(energies.std(ddof=1)) / mean if mean > 0 else None,
+        'step_energy_source': source,
+    }
+
+
 def _column_stat(df: pd.DataFrame, column: str, how: str) -> float | None:
     """max/min/mean of an optional column, None when it was never reported."""
     if column not in df.columns or not df[column].notna().any():
@@ -194,6 +257,7 @@ def compute_stats(df: pd.DataFrame, summary: dict[str, Any],
         stats.update(transient_stats(None))
 
     stats.update(step_time_stats(step_durations(summary)))
+    stats.update(step_energy_stats(*step_energy(summary, df, trace)))
 
     tokens_per_step = summary.get('tokens_per_step')
     elapsed = summary.get('elapsed_time_sec') or 0.0

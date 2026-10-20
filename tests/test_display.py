@@ -64,3 +64,11 @@ def test_no_step_rows_without_stamps(telemetry_sample):
     rows = dict(display.summary_rows(_df(telemetry_sample), FULL))
 
     assert "Step Time p50 / p99 (s)" not in rows
+
+
+def test_energy_per_step_row_names_its_source(telemetry_sample):
+    summary = {**FULL, "measure_start": 100.0, "step_times": [104.0, 108.0]}
+
+    rows = dict(display.summary_rows(_df(telemetry_sample), summary))
+
+    assert "Energy per Step p50 / p95 (J, counter)" in rows

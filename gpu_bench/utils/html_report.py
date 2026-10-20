@@ -14,8 +14,9 @@ from typing import Any
 import pandas as pd
 from matplotlib.figure import Figure
 
+from gpu_bench.core.metrics import step_durations, step_energy
 from gpu_bench.utils.display import headline_cards, summary_rows
-from gpu_bench.utils.plots import build_report_figure, draw_loss
+from gpu_bench.utils.plots import build_report_figure, build_step_figure, draw_loss
 
 _CSS = """
 :root {
@@ -112,6 +113,10 @@ def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any]
     loss_panel = (f"<section class='panel'><h2>Loss</h2><figure class='chart'>{loss_svg}"
                   f"</figure></section>") if loss_svg else ""
 
+    step_fig = build_step_figure(step_durations(summary), *step_energy(summary, df, trace))
+    steps_panel = (f"<section class='panel'><h2>Steps</h2><figure class='chart'>"
+                   f"{figure_svg(step_fig)}</figure></section>") if step_fig else ""
+
     sampler = report.get("power_sampler") or {}
     environment = [
         ("GPU", gpu_name),
@@ -145,6 +150,7 @@ def build_html(report: dict[str, Any], df: pd.DataFrame, summary: dict[str, Any]
 <section class="cards">{cards}</section>
 <section class="panel"><h2>Telemetry</h2><figure class="chart">{telemetry_svg}</figure></section>
 {loss_panel}
+{steps_panel}
 <section class="tables">
 <div class="panel"><h2>Results</h2>{_table(summary_rows(df, summary, trace))}</div>
 <div><div class="panel"><h2>Workload</h2>{_table(workload_rows)}</div>

@@ -1,4 +1,5 @@
 """Shared chart drawing: one definition of each panel for screen and export."""
+import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
@@ -149,3 +150,18 @@ def test_report_figure_takes_the_trace_too(telemetry_sample):
     fig = plots.build_report_figure(_df(telemetry_sample), trace)
 
     assert "Power, instant (W)" in [line.get_label() for ax in fig.axes for line in ax.get_lines()]
+
+
+def test_step_figure_needs_two_steps():
+    assert plots.build_step_figure(np.array([1.0]), np.empty(0)) is None
+
+
+def test_step_figure_adds_the_energy_histogram_when_there_is_energy():
+    durations = np.array([1.0, 1.1, 0.9, 1.0])
+
+    alone = plots.build_step_figure(durations, np.empty(0))
+    both = plots.build_step_figure(durations, np.array([100.0, 110.0, 90.0, 100.0]), "counter")
+
+    assert len(alone.axes) == 1
+    assert [ax.get_title() for ax in both.axes] == ["Step Duration", "Energy per Step"]
+    assert "counter" in both.axes[1].get_xlabel()

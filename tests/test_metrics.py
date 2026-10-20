@@ -203,3 +203,63 @@ def test_step_time_stats_catch_the_slow_tail():
 def test_step_time_stats_need_two_steps():
     assert metrics.step_time_stats(np.array([1.0])) == dict.fromkeys(
         ("step_time_p50_s", "step_time_p99_s", "step_time_cv"))
+
+
+def _polls(t0, t1, every, watts):
+    """250 ms-style polls with a matching energy counter."""
+    t = np.arange(t0, t1 + 1e-9, every)
+    return pd.DataFrame({"timestamp": t, "power_w": watts,
+                         "energy_mj": (t - t0) * watts * 1000})
+
+
+def _trace_500hz(t0, t1, power_at):
+    t = np.arange(t0, t1 + 1e-9, 0.002)
+    return pd.DataFrame({"timestamp": t, "power_w": [power_at(x) for x in t]})
+
+
+def test_step_energy_comes_from_the_trace_when_there_is_one():
+    summary = {"measure_start": 100.0, "step_times": [101.0, 102.0, 103.0, 104.0]}
+    # 200 W through the second step, 100 W otherwise.
+    trace = _trace_500hz(99.0, 105.0, lambda x: 200.0 if 101.0 <= x < 102.0 else 100.0)
+
+    energies, source = metrics.step_energy(summary, _polls(99, 105, 0.25, 100.0), trace)
+
+    assert source == "instant trace"
+    assert energies == pytest.approx([100.0, 200.0, 100.0, 100.0], abs=0.5)
+
+
+def test_step_energy_falls_back_to_the_counter():
+    summary = {"measure_start": 100.0, "step_times": [102.0, 104.0, 106.0]}
+
+    energies, source = metrics.step_energy(summary, _polls(99, 107, 0.25, 150.0))
+
+    assert source == "counter"
+    assert energies == pytest.approx([300.0, 300.0, 300.0])
+
+
+def test_steps_too_short_for_the_polls_get_no_energy():
+    summary = {"measure_start": 100.0, "step_times": [100.3, 100.6, 100.9]}
+
+    energies, source = metrics.step_energy(summary, _polls(99, 102, 0.25, 150.0))
+
+    assert len(energies) == 0 and source is None
+
+
+def test_a_trace_that_misses_part_of_the_window_is_not_used():
+    summary = {"measure_start": 100.0, "step_times": [102.0, 104.0, 106.0]}
+    late_trace = _trace_500hz(103.0, 107.0, lambda x: 999.0)
+
+    _, source = metrics.step_energy(summary, _polls(99, 107, 0.25, 150.0), late_trace)
+
+    assert source == "counter"
+
+
+def test_per_step_energy_reaches_the_stats(telemetry_sample):
+    df = _df(telemetry_sample)             # one poll a second, 100..108
+    summary = {"total_steps": 2, "elapsed_time_sec": 8.0, "measure_start": 100.0,
+               "measure_end": 108.0, "step_times": [104.0, 108.0]}
+
+    stats = metrics.compute_stats(df, summary)
+
+    assert stats["step_energy_source"] == "counter"
+    assert stats["step_energy_p50_j"] > 0
