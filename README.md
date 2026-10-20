@@ -136,7 +136,7 @@ docker run --rm --gpus all -v "$PWD/logs:/home/bench/logs" -v hf-cache:/home/ben
     gpu-bench --preset standard --repeat 3 --cooldown 120
 ```
 
-Everything after the image name is passed to `gpu-bench --headless`, and results land in the mounted `logs/`. The image is built on PyTorch's CUDA runtime image, so torch is the CUDA build matching it rather than whatever pip resolves; the native power sampler is compiled in a first build stage and only its wheel is carried over, so the final image has no compiler. It runs as an unprivileged user, asks the driver for its `utility` capability as well as `compute` (NVML needs it), and keeps the Hugging Face cache on a volume so models download once. With the compose stack, `--profile bench` runs it alongside Prometheus and Grafana, already scraped.
+Everything after the image name is passed to `gpu-bench --headless`, and results land in the mounted `logs/`. The image is built on PyTorch's CUDA runtime image, so torch is the CUDA build matching it rather than whatever pip resolves; the native power sampler is compiled in a first build stage and only its wheel is carried over, so the final image has no compiler. It runs as an unprivileged user, asks the driver for its `utility` capability as well as `compute` (NVML needs it), and keeps the Hugging Face cache on a volume so models download once. With the compose stack, `--profile bench` runs it alongside Prometheus and Grafana, already scraped. CI builds the image whenever anything that goes into it changes, and checks that it starts, imports every headless module and the native sampler, runs unprivileged, and that the compose stack validates.
 
 ### Live metrics for Prometheus
 
@@ -288,6 +288,7 @@ deploy/                        — Docker Compose stack: Prometheus scraping --m
 Dockerfile                     — the headless benchmark as a CUDA image: native wheel built in a first stage, run unprivileged
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
+.github/workflows/image.yml    — builds and smoke-tests the container image; pushes it to GHCR when the release calls it
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 mypy.ini                       — type-check settings (strict, the whole package)

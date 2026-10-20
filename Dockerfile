@@ -32,6 +32,11 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels .
 # --- 2: runtime ------------------------------------------------------------------
 FROM ${PYTORCH_IMAGE}
 
+# The source label links a published image to its repository on GitHub.
+LABEL org.opencontainers.image.title="AI GPU Benchmark" \
+      org.opencontainers.image.description="LoRA fine-tuning GPU benchmark, headless" \
+      org.opencontainers.image.source="https://github.com/PeGoPaz/AI-GPU-Benchmark"
+
 # What Qt's core libraries load even without a display, as in CI.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
