@@ -289,6 +289,7 @@ Dockerfile                     — the headless benchmark as a CUDA image: nativ
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
 .github/workflows/image.yml    — builds and smoke-tests the container image; pushes it to GHCR when the release calls it
+.github/workflows/wheels.yml   — prebuilt native wheels for Linux and Windows with cibuildwheel, each one tested
 pytest.ini                     — pytest configuration
 ruff.toml                      — lint rule set (pinned explicitly, not Ruff's shifting defaults)
 mypy.ini                       — type-check settings (strict, the whole package)
@@ -331,7 +332,7 @@ QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg pytest
 pip install ./native
 ```
 
-That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. When the module is importable and NVML is reachable, the telemetry thread starts it next to its own 250 ms polling and drains it on every poll:
+That needs CMake 3.25+ and a C++17 compiler, but no CUDA Toolkit. Or no compiler at all: CI builds wheels for Linux (manylinux, x86_64) and Windows for Python 3.10–3.13 with cibuildwheel, tests each one in a clean environment, and every release attaches them — `pip install` the one matching your Python from the release page. When the module is importable and NVML is reachable, the telemetry thread starts it next to its own 250 ms polling and drains it on every poll:
 
 - the dashboard's power reading gains the highest instant reading since the previous poll — `Power: 180 W (peak 262 W)`;
 - the Thermal & Power chart draws instantaneous power faintly behind the polls, thinned to a min/max envelope so that single-sample spikes survive the drawing;

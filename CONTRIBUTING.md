@@ -65,10 +65,9 @@ Everything here reads the JSON run report (`report_<timestamp>.json`), so it wor
 
 ### 3. The native module
 
-The C++ power sampler in `native/` is built, tested and wired in; what is left are the edges.
+The C++ power sampler in `native/` is built, tested, wired in and shipped as prebuilt wheels; what is left are the edges.
 
-- **Per-step power.** The trace is fine-grained enough to attribute energy to individual optimizer steps, if the trainer stamps each step boundary. That would show whether the transients come from the forward pass, the backward pass or the optimizer, and give a joules-per-step distribution rather than one average.
-- **Wheels.** `pip install ./native` compiles on the spot. cibuildwheel in CI could publish prebuilt Linux and Windows wheels, so neither a cloud GPU box nor a gaming PC needs a compiler at all.
+- **Per-phase power.** Energy per optimizer step is in (`step_energy` in `gpu_bench/core/metrics.py`); one level finer is the phases inside a step. Stamping the forward pass, the backward pass and the optimizer separately — a Trainer callback has no hooks for them, so module hooks or a subclassed `training_step` — would show which of them the transients come from.
 
 ### 4. Inference benchmark
 
