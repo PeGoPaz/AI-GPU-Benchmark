@@ -21,6 +21,31 @@ class ExportPaths(NamedTuple):
 PowerChunk = tuple[np.ndarray, np.ndarray]
 
 
+def unique_stamp(output_dir: str, pattern: str) -> str:
+    """A timestamp for file names that no file in output_dir uses yet.
+
+    Seconds are fine-grained enough for one run, but a series or a sweep can
+    finish two quick runs within the same second; a counter goes on the end
+    then, rather than one run's files silently replacing the other's.
+    """
+    base = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp, n = base, 1
+    while os.path.exists(os.path.join(output_dir, pattern.format(stamp))):
+        n += 1
+        stamp = f"{base}_{n}"
+    return stamp
+
+
+def write_json(output_dir: str, prefix: str, data: dict[str, Any]) -> str:
+    """Writes data as <prefix>_<timestamp>.json in output_dir; returns the path."""
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir,
+                        f"{prefix}_{unique_stamp(output_dir, prefix + '_{}.json')}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return path
+
+
 class BenchmarkLogger:
     def __init__(self) -> None:
         self.data: list[dict[str, Any]] = []
@@ -102,7 +127,7 @@ class BenchmarkLogger:
         self-contained HTML page (gpu_bench.utils.html_report).
         """
         os.makedirs(output_dir, exist_ok=True)
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_str = unique_stamp(output_dir, "run_{}.csv")
         csv_path = os.path.join(output_dir, f"run_{timestamp_str}.csv")
         plot_path = os.path.join(output_dir, f"plot_{timestamp_str}.png")
 

@@ -294,3 +294,81 @@ def test_native_trace_reaches_the_summary_and_the_export(tmp_path, telemetry_sam
     assert any(tmp_path.glob("power_*.csv"))
     [report] = tmp_path.glob("report_*.json")
     assert json.loads(report.read_text(encoding="utf-8"))["power_sampler"]["active"] is True
+
+
+# --- series (--repeat) ------------------------------------------------------------
+
+def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_after=None):
+    """A Series of threadless runs, driven on a local event loop until done."""
+    from PyQt6.QtCore import QEventLoop, QTimer
+
+    from gpu_bench.batch import Series
+
+    FakeTelemetry.samples = [telemetry_sample(i) for i in range(6)]
+    ScriptedTrainer.total = 20
+    outcomes = list(outcomes or ["finish"] * repeat)
+    out = io.StringIO()
+    made = []
+
+    def make_run():
+        ScriptedTrainer.outcome = outcomes[len(made)]
+        run = cli.HeadlessRun(cli.workload_from_args(_parse()), str(tmp_path), out=out,
+                              trainer_cls=ScriptedTrainer, telemetry_cls=FakeTelemetry)
+        made.append(run)
+        if stop_after is not None and len(made) == stop_after:
+            run.start = lambda r=run: (series.request_stop(), cli.HeadlessRun.start(r))
+        return run
+
+    series = Series(make_run, repeat, str(tmp_path), out=out)
+    codes = []
+    loop = QEventLoop()
+    series.done.connect(lambda code: (codes.append(code), loop.quit()))
+    QTimer.singleShot(0, series.start)
+    QTimer.singleShot(5000, loop.quit)                # a hung series fails, not hangs
+    loop.exec()
+    return series, codes, out.getvalue(), made
+
+
+def test_repeat_runs_the_workload_n_times_and_writes_the_series(qapp, tmp_path,
+                                                                   telemetry_sample):
+    series, codes, out, made = _run_series(qapp, tmp_path, telemetry_sample, repeat=3)
+
+    assert codes == [0]
+    assert len(made) == 3
+    assert "=== Run 3 of 3 ===" in out
+    assert "=== Series: 3 runs ===" in out
+    record = json.loads(open(series.path, encoding="utf-8").read())
+    assert record["kind"] == "series"
+    assert len(record["members"]) == 3
+    assert len({m["report"] for m in record["members"]}) == 3     # no file reused
+    assert record["metrics"]["tokens_per_sec"]["n"] == 3
+
+
+def test_a_failed_run_ends_the_series(qapp, tmp_path, telemetry_sample):
+    series, codes, out, made = _run_series(qapp, tmp_path, telemetry_sample, repeat=3,
+                                           outcomes=["finish", "error", "finish"])
+
+    assert codes == [1]
+    assert len(made) == 2
+    assert "Fewer than two runs finished" in out
+    assert series.path is None
+
+
+def test_ctrl_c_finishes_the_current_run_and_summarises(qapp, tmp_path, telemetry_sample):
+    series, codes, out, made = _run_series(qapp, tmp_path, telemetry_sample, repeat=4,
+                                           stop_after=2)
+
+    assert codes == [cli.EXIT_INTERRUPTED]
+    assert len(made) == 2
+    assert "=== Series: 2 runs ===" in out
+
+
+def test_repeat_without_headless_is_pointed_out():
+    args = cli.build_parser().parse_args(["--repeat", "3"])
+
+    assert "--repeat" in cli.gui_only_misuse(args)
+
+
+def test_repeat_must_be_positive(capsys):
+    with pytest.raises(SystemExit):
+        _parse("--repeat", "0")

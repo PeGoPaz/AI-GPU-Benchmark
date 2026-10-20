@@ -16,6 +16,7 @@ from typing import Any, TextIO, TypeVar
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
 from gpu_bench import __version__
+from gpu_bench.batch import EXIT_INTERRUPTED, Series
 from gpu_bench.core.telemetry import TelemetryWorker
 from gpu_bench.core.trainer import (
     DEFAULT_PRESET,
@@ -30,12 +31,8 @@ from gpu_bench.core.trainer import (
     estimate_weights_gib,
 )
 from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
-from gpu_bench.utils.logger import BenchmarkLogger
+from gpu_bench.utils.logger import BenchmarkLogger, ExportPaths
 from gpu_bench.utils.report import build_report
-
-# Exit status after Ctrl+C, by the shell's 128 + SIGINT convention: the
-# results are written, but a script can still tell the run was cut short.
-EXIT_INTERRUPTED = 130
 
 # Workload flags. Each one overrides the preset; left out, the preset decides.
 _WORKLOAD_FLAGS = ("model", "precision", "steps", "batch_size", "seq_len",
@@ -115,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
                           help="untimed steps before measuring (default: 10)")
     workload.add_argument("--output-dir", default="logs",
                           help="where CSV, PNG and report go (default: logs)")
+
+    batch = parser.add_argument_group("several runs (headless only)")
+    batch.add_argument("--repeat", type=_at_least(1), default=1, metavar="N",
+                       help="run the workload N times and report the mean and spread, "
+                            "outliers dropped (default: 1)")
     return parser
 
 
@@ -141,6 +143,8 @@ def gui_only_misuse(args: argparse.Namespace) -> str | None:
     """Explains why workload flags were ignored, if they were given without --headless."""
     given = [f"--{flag.replace('_', '-')}" for flag in _WORKLOAD_FLAGS
              if getattr(args, flag) is not None]
+    if args.repeat != 1:
+        given.append("--repeat")
     if not args.headless and given:
         return (f"{', '.join(given)} only apply with --headless; "
                 "the window has its own Workload panel.")
@@ -184,6 +188,9 @@ class HeadlessRun(QObject):
         self.output_dir = output_dir
         self.out = out or sys.stdout
         self.exit_code: int | None = None
+        # The finished run's report and where it was written, for a series.
+        self.report: dict[str, Any] | None = None
+        self.paths: ExportPaths | None = None
         self.logger = BenchmarkLogger()
         self._device: dict[str, Any] | None = None
         self._sampler_status: dict[str, Any] | None = None
@@ -302,6 +309,8 @@ class HeadlessRun(QObject):
             self._print(f"\nExport failed: {e}")
             self._finish(1)
             return
+        self.report = report if paths.report else None
+        self.paths = paths
         self._print("")
         for path in paths:
             if path:
@@ -335,7 +344,13 @@ def run_headless(args: argparse.Namespace) -> int:
         return 0
 
     app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
-    run = HeadlessRun(workload_from_args(args), args.output_dir)
+    workload = workload_from_args(args)
+
+    def make_run() -> HeadlessRun:
+        return HeadlessRun(workload, args.output_dir)
+
+    run: HeadlessRun | Series = (Series(make_run, args.repeat, args.output_dir)
+                                 if args.repeat > 1 else make_run())
     run.done.connect(app.exit)
 
     # Python only runs signal handlers between bytecodes, and Qt's event loop

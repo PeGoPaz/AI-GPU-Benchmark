@@ -104,6 +104,12 @@ gpu-bench --list
 
 Flags override the preset, and models and precisions can be named by label, Hugging Face id or any unique prefix (`int4`, `phi-3.5-mini`); an ambiguous one such as `qwen2.5` is refused with the candidates listed. Progress prints about twenty times per run, the summary table at the end, and the CSV, PNG and JSON report are always written to `--output-dir` (default `logs/`). Ctrl+C stops at the next step boundary and still writes the results. The exit status is 0 for a complete run, 130 for one stopped with Ctrl+C, and 1 for a failure — including no telemetry at all, since numbers without the card's readings are not worth keeping. Headless mode runs on a `QCoreApplication`, so it needs no display and never loads the widget stack.
 
+One run is an anecdote: back to back, the same card on the same workload still varies by a percent or two. `--repeat N` runs the workload N times in a row, each with its own files, and ends with the series: every key figure as mean ± coefficient of variation with its range, and a `series_<timestamp>.json` naming the member reports. A run that disagrees with the rest — a background update, a thermal event — is dropped first, by the modified z-score (median and median absolute deviation, cut-off 3.5), which a single wild value cannot hide from the way it can from a mean and standard deviation; with three or more runs only, and a dropped run leaves every figure, not just throughput. Ctrl+C ends the series after the current run and still summarises the ones that finished.
+
+```bash
+gpu-bench --headless --preset quick --repeat 5
+```
+
 ---
 
 ## How It Works
@@ -187,6 +193,7 @@ gpu_bench/
   __init__.py                  — the version, in one place
   __main__.py                  — entry point: the window, or a headless run with --headless
   cli.py                       — headless mode: argument parsing, a run wired to stdout
+  batch.py                     — several headless runs in a row: --repeat, combined into one series
   ui/
     main_window.py             — GUI layout, thread wiring, summary table, console log
     live_charts.py             — pyqtgraph live charts, fed one snapshot at a time
@@ -202,6 +209,7 @@ gpu_bench/
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window, per-step time and energy
     thermal.py                 — the first-order heating fit: τ, the steady temperature, whether the run got there
     peak.py                    — the card's peak dense throughput from its architecture, SM count and clock, for MFU
+    series.py                  — several runs' results reduced to mean ± spread, outliers dropped by modified z-score
     power_sampler.py           — opens the native sampler when it is built, explains why not when it is not
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion; imports the ML stack only when a run starts
   utils/
