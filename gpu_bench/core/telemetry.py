@@ -191,6 +191,28 @@ def read_device_info(handle: Handle, gpu_name: str) -> dict[str, Any]:
     }
 
 
+def read_gpu_temperature(index: int = 0) -> float | None:
+    """One core temperature reading outside the poll loop, None without NVML.
+
+    For the pause between runs, when no TelemetryWorker is running. NVML
+    counts initialisations, so this is safe alongside one that is.
+    """
+    try:
+        pynvml.nvmlInit()
+    except Exception:
+        return None
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+        return float(pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU))
+    except Exception:
+        return None
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
+
 class TelemetryWorker(QThread):
     # Signals to pass hardware telemetry data back to the UI thread
     data_updated = pyqtSignal(dict)

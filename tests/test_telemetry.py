@@ -376,3 +376,12 @@ def test_sampler_that_fails_to_start_degrades_to_polling(monkeypatch):
     assert snapshots[0]["power_peak_w"] is None
     assert status[0]["active"] is False
     assert "failed to start" in status[0]["detail"]
+
+
+def test_one_off_temperature_reading_initialises_and_shuts_down(monkeypatch):
+    calls = []
+    _patch_nvml(monkeypatch, nvmlInit=lambda: calls.append("init"),
+                nvmlShutdown=lambda: calls.append("shutdown"))
+
+    assert telemetry.read_gpu_temperature() == 72.0
+    assert calls == ["init", "shutdown"]

@@ -117,6 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--repeat", type=_at_least(1), default=1, metavar="N",
                        help="run the workload N times and report the mean and spread, "
                             "outliers dropped (default: 1)")
+    batch.add_argument("--cooldown", type=_at_least(0), default=0, metavar="SECONDS",
+                       help="between runs, wait up to this long for the GPU to cool back "
+                            "to its starting temperature (default: 0, no wait)")
     return parser
 
 
@@ -145,6 +148,8 @@ def gui_only_misuse(args: argparse.Namespace) -> str | None:
              if getattr(args, flag) is not None]
     if args.repeat != 1:
         given.append("--repeat")
+    if args.cooldown:
+        given.append("--cooldown")
     if not args.headless and given:
         return (f"{', '.join(given)} only apply with --headless; "
                 "the window has its own Workload panel.")
@@ -349,7 +354,8 @@ def run_headless(args: argparse.Namespace) -> int:
     def make_run() -> HeadlessRun:
         return HeadlessRun(workload, args.output_dir)
 
-    run: HeadlessRun | Series = (Series(make_run, args.repeat, args.output_dir)
+    run: HeadlessRun | Series = (Series(make_run, args.repeat, args.output_dir,
+                                        cooldown_s=args.cooldown)
                                  if args.repeat > 1 else make_run())
     run.done.connect(app.exit)
 

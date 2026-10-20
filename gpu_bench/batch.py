@@ -5,22 +5,35 @@ back to back on the same event loop — the next one starts only once the
 last has joined its threads and freed its VRAM — and their reports are
 combined: --repeat runs one workload N times for a mean with an error bar.
 
+Back to back, every run after the first would start on a card the last one
+left hot, and lose to it on clocks before measuring anything. --cooldown
+waits between runs until the GPU is back near the temperature it started
+the series at, for at most that many seconds.
+
 The runs are made by a factory rather than constructed here, so tests can
 hand in runs with threadless workers, and so this module does not import
 the CLI that drives it.
 """
 import os
 import sys
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TextIO
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from gpu_bench.core import series
+from gpu_bench.core.telemetry import read_gpu_temperature
 from gpu_bench.utils.logger import write_json
 
 if TYPE_CHECKING:
     from gpu_bench.cli import HeadlessRun
+
+# Back within this much of the starting temperature counts as cooled down:
+# closer, and the last degree or two of an exponential decay would take
+# longer than the run itself.
+COOLDOWN_MARGIN_C = 2.0
+COOLDOWN_POLL_MS = 1000
 
 # Exit status after Ctrl+C, by the shell's 128 + SIGINT convention: the
 # results are written, but a script can still tell the run was cut short.
@@ -39,10 +52,22 @@ class Series(QObject):
 
     def __init__(self, make_run: Callable[[], "HeadlessRun"], repeat: int,
                  output_dir: str = "logs", out: TextIO | None = None,
+                 cooldown_s: float = 0.0,
+                 read_temperature: Callable[[], float | None] = read_gpu_temperature,
+                 clock: Callable[[], float] = time.monotonic,
+                 poll_ms: int = COOLDOWN_POLL_MS,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.make_run = make_run
         self.repeat = repeat
+        self.cooldown_s = cooldown_s
+        self.read_temperature = read_temperature
+        self.clock = clock
+        self.baseline_c: float | None = None
+        self._cooling_since: float | None = None
+        self._cool_timer = QTimer(self)
+        self._cool_timer.setInterval(poll_ms)
+        self._cool_timer.timeout.connect(self._check_cooled)
         self.output_dir = output_dir
         self.out = out or sys.stdout
         self.reports: list[dict[str, Any]] = []
@@ -57,11 +82,21 @@ class Series(QObject):
         print(text, file=self.out, flush=True)
 
     def start(self) -> None:
+        if self.cooldown_s > 0:
+            self.baseline_c = self.read_temperature()
+            if self.baseline_c is None:
+                self._print("No GPU temperature reading, so no cool-down between runs.")
+            else:
+                self._print(f"Starting temperature: {self.baseline_c:.0f} °C — later runs "
+                            f"wait (up to {self.cooldown_s:g} s) to get back near it.")
         self._start_next()
 
     def request_stop(self) -> None:
         self._interrupted = True
-        if self._current is not None:
+        if self._cool_timer.isActive():
+            self._cool_timer.stop()
+            self._conclude(0)
+        elif self._current is not None:
             self._current.request_stop()
 
     def _start_next(self) -> None:
@@ -81,9 +116,36 @@ class Series(QObject):
         if code == 0 and not self._interrupted and self._finished_runs < self.repeat:
             # Queued rather than called: the finished run's slot is still on
             # the stack, and its threads must be gone before the next starts.
-            QTimer.singleShot(0, self._start_next)
+            QTimer.singleShot(0, self._between_runs)
             return
         self._conclude(code)
+
+    def _between_runs(self) -> None:
+        if self.cooldown_s <= 0 or self.baseline_c is None:
+            self._start_next()
+            return
+        self._cooling_since = self.clock()
+        temp = self.read_temperature()
+        if temp is not None and temp <= self.baseline_c + COOLDOWN_MARGIN_C:
+            self._start_next()
+            return
+        self._print(f"Cooling down from {temp:.0f} °C towards {self.baseline_c:.0f} °C..."
+                    if temp is not None else "Cooling down...")
+        self._cool_timer.start()
+
+    def _check_cooled(self) -> None:
+        assert self.baseline_c is not None and self._cooling_since is not None
+        waited = self.clock() - self._cooling_since
+        temp = self.read_temperature()
+        if temp is not None and temp <= self.baseline_c + COOLDOWN_MARGIN_C:
+            self._print(f"Cooled to {temp:.0f} °C in {waited:.0f} s.")
+        elif waited >= self.cooldown_s:
+            reading = f"{temp:.0f} °C" if temp is not None else "an unknown temperature"
+            self._print(f"Still at {reading} after {waited:.0f} s; starting anyway.")
+        else:
+            return
+        self._cool_timer.stop()
+        self._start_next()
 
     def _conclude(self, code: int) -> None:
         if len(self.reports) >= 2:

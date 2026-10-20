@@ -298,7 +298,8 @@ def test_native_trace_reaches_the_summary_and_the_export(tmp_path, telemetry_sam
 
 # --- series (--repeat) ------------------------------------------------------------
 
-def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_after=None):
+def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_after=None,
+                **series_kwargs):
     """A Series of threadless runs, driven on a local event loop until done."""
     from PyQt6.QtCore import QEventLoop, QTimer
 
@@ -319,7 +320,7 @@ def _run_series(qapp, tmp_path, telemetry_sample, repeat=3, outcomes=None, stop_
             run.start = lambda r=run: (series.request_stop(), cli.HeadlessRun.start(r))
         return run
 
-    series = Series(make_run, repeat, str(tmp_path), out=out)
+    series = Series(make_run, repeat, str(tmp_path), out=out, **series_kwargs)
     codes = []
     loop = QEventLoop()
     series.done.connect(lambda code: (codes.append(code), loop.quit()))
@@ -372,3 +373,59 @@ def test_repeat_without_headless_is_pointed_out():
 def test_repeat_must_be_positive(capsys):
     with pytest.raises(SystemExit):
         _parse("--repeat", "0")
+
+
+
+class _Thermometer:
+    """Plays back temperatures, one per reading; the last one repeats."""
+
+    def __init__(self, *temps):
+        self.temps, self.reads = list(temps), 0
+
+    def __call__(self):
+        self.reads += 1
+        return self.temps.pop(0) if len(self.temps) > 1 else self.temps[0]
+
+
+def test_cooldown_waits_for_the_starting_temperature(qapp, tmp_path, telemetry_sample):
+    # baseline 45; after run 1: 70, 60, 50, 46 (cooled); after run 2: 46 at once
+    thermometer = _Thermometer(45.0, 70.0, 60.0, 50.0, 46.0, 46.0)
+
+    series, codes, out, made = _run_series(qapp, tmp_path, telemetry_sample, repeat=3,
+                                           cooldown_s=60, read_temperature=thermometer,
+                                           poll_ms=1)
+
+    assert codes == [0] and len(made) == 3
+    assert "Starting temperature: 45 °C" in out
+    assert "Cooling down from 70 °C towards 45 °C..." in out
+    assert "Cooled to 46 °C" in out
+
+
+def test_cooldown_gives_up_after_its_limit(qapp, tmp_path, telemetry_sample):
+    ticks = iter(range(0, 10_000, 10))       # ten seconds per reading
+
+    series, codes, out, made = _run_series(
+        qapp, tmp_path, telemetry_sample, repeat=2, cooldown_s=30,
+        read_temperature=_Thermometer(45.0, 80.0), clock=lambda: next(ticks), poll_ms=1)
+
+    assert codes == [0] and len(made) == 2
+    assert "Still at 80 °C after 30 s; starting anyway." in out
+
+
+def test_no_temperature_means_no_cooldown(qapp, tmp_path, telemetry_sample):
+    series, codes, out, made = _run_series(qapp, tmp_path, telemetry_sample, repeat=2,
+                                           cooldown_s=60, read_temperature=lambda: None)
+
+    assert codes == [0] and len(made) == 2
+    assert "no cool-down between runs" in out
+
+
+def test_gpu_temperature_without_nvml_is_none(monkeypatch):
+    from gpu_bench.core import telemetry
+
+    def no_driver():
+        raise Exception("NVML_ERROR_LIBRARY_NOT_FOUND")
+
+    monkeypatch.setattr(telemetry.pynvml, "nvmlInit", no_driver)
+
+    assert telemetry.read_gpu_temperature() is None

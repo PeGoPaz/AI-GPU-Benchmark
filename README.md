@@ -106,8 +106,10 @@ Flags override the preset, and models and precisions can be named by label, Hugg
 
 One run is an anecdote: back to back, the same card on the same workload still varies by a percent or two. `--repeat N` runs the workload N times in a row, each with its own files, and ends with the series: every key figure as mean ± coefficient of variation with its range, and a `series_<timestamp>.json` naming the member reports. A run that disagrees with the rest — a background update, a thermal event — is dropped first, by the modified z-score (median and median absolute deviation, cut-off 3.5), which a single wild value cannot hide from the way it can from a mean and standard deviation; with three or more runs only, and a dropped run leaves every figure, not just throughput. Ctrl+C ends the series after the current run and still summarises the ones that finished.
 
+Back to back, every run after the first would also start on a card the last one left hot — and lose to it on clocks before measuring anything. `--cooldown SECONDS` reads the GPU temperature before the first run and, between runs, waits until it is back within 2 °C of that, for at most the given time:
+
 ```bash
-gpu-bench --headless --preset quick --repeat 5
+gpu-bench --headless --preset quick --repeat 5 --cooldown 120
 ```
 
 ---
@@ -193,7 +195,7 @@ gpu_bench/
   __init__.py                  — the version, in one place
   __main__.py                  — entry point: the window, or a headless run with --headless
   cli.py                       — headless mode: argument parsing, a run wired to stdout
-  batch.py                     — several headless runs in a row: --repeat, combined into one series
+  batch.py                     — several headless runs in a row: --repeat, with --cooldown between them, combined into one series
   ui/
     main_window.py             — GUI layout, thread wiring, summary table, console log
     live_charts.py             — pyqtgraph live charts, fed one snapshot at a time
