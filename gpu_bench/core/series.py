@@ -120,6 +120,49 @@ def format_aggregate(agg: dict[str, Any], fmt: str) -> str:
     return f"{value}{spread}  ({fmt.format(agg['min'])} – {fmt.format(agg['max'])})"
 
 
+def pareto_front(points: Sequence[tuple[float, float]]) -> list[int]:
+    """Indices of the points no other point beats on both axes, both maximised.
+
+    A configuration is on the front when nothing else is at least as fast
+    and at least as efficient, and strictly better at one of them: every
+    other configuration is a worse deal than some point on it. O(n²), which
+    for the dozens of configurations a sweep runs is nothing.
+    """
+    front = []
+    for i, (x, y) in enumerate(points):
+        if not any(ox >= x and oy >= y and (ox > x or oy > y)
+                   for j, (ox, oy) in enumerate(points) if j != i):
+            front.append(i)
+    return front
+
+
+def picks(points: Sequence[tuple[float, float]]) -> dict[str, int]:
+    """The three configurations worth naming: fastest, most efficient, balanced.
+
+    Balanced is the front point nearest the ideal one that would be both the
+    fastest and the most efficient, with each axis scaled to the range the
+    sweep covered so that neither unit dominates the distance. Empty for no
+    points.
+    """
+    if not points:
+        return {}
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+
+    def scaled(v: float, lo: float, hi: float) -> float:
+        return (v - lo) / (hi - lo) if hi > lo else 1.0
+
+    front = pareto_front(points)
+    balanced = min(front, key=lambda i: math.hypot(1 - scaled(xs[i], min(xs), max(xs)),
+                                                   1 - scaled(ys[i], min(ys), max(ys))))
+    # On ties, max() keeps the first: the configuration listed earlier.
+    return {
+        "fastest": max(front, key=lambda i: xs[i]),
+        "most_efficient": max(front, key=lambda i: ys[i]),
+        "balanced": balanced,
+    }
+
+
 def build_record(reports: Sequence[dict[str, Any]], files: Sequence[str]) -> dict[str, Any]:
     """The series as one JSON document: what ran, each run's figures, the aggregate.
 

@@ -121,6 +121,8 @@ gpu-bench --headless --preset standard --steps 100 --repeat 3 --cooldown 120 \
 
 Before anything runs, combinations whose weights alone would not fit the card's VRAM are listed and skipped — the same estimate as the window's fit hint. One that still runs out of memory at run time (activations grow with batch and sequence length; the estimate counts weights) is marked *out of memory* and the sweep carries on with the next. It ends with a table of every combination's tokens/sec, tokens/J and peak temperature; Ctrl+C ends it after the current run, table included.
 
+Speed and efficiency pull against each other — the fastest setting is rarely the one that does the most work per joule — so there is usually no single winner, only a set of fair trades. The table marks that set: the **Pareto front**, the combinations nothing else beats on both tokens/sec and tokens/J at once; everything off it is a worse deal than something on it. Three of them are named underneath: the *fastest*, the *most efficient*, and the *balanced* one — the front point nearest the ideal that would be both, with each axis scaled to the range the sweep covered so that neither unit dominates.
+
 ---
 
 ## How It Works
@@ -220,7 +222,7 @@ gpu_bench/
     metrics.py                 — summary numbers: tokens/sec, estimated TFLOPS, energy over the timed window, per-step time and energy
     thermal.py                 — the first-order heating fit: τ, the steady temperature, whether the run got there
     peak.py                    — the card's peak dense throughput from its architecture, SM count and clock, for MFU
-    series.py                  — several runs' results reduced to mean ± spread, outliers dropped by modified z-score
+    series.py                  — several runs' results reduced to mean ± spread, outliers dropped by modified z-score; a sweep's Pareto front
     power_sampler.py           — opens the native sampler when it is built, explains why not when it is not
     trainer.py                 — TrainerWorker (QThread): runs LoRA fine-tuning via HF Trainer, frees VRAM on completion; imports the ML stack only when a run starts
   utils/

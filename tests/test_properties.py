@@ -12,7 +12,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from gpu_bench.cli import resolve
-from gpu_bench.core import metrics, thermal
+from gpu_bench.core import metrics, series, thermal
 from gpu_bench.core.trainer import MODELS, PRECISIONS, PRESETS, pack_tokens
 from gpu_bench.ui.widgets.gauge import nice_ceiling
 from gpu_bench.utils.plots import envelope
@@ -191,3 +191,32 @@ def test_the_heating_fit_recovers_any_clean_curve(tau, start, rise, periods):
     assert math.isclose(fit.tau_s, tau, rel_tol=0.02)
     assert math.isclose(fit.steady_c, start + rise, abs_tol=0.02 * rise + 0.1)
     assert fit.saturated == (t[-1] >= 3 * fit.tau_s)
+
+
+# --- sweeps -----------------------------------------------------------------
+
+points = st.lists(st.tuples(st.floats(0, 1e5), st.floats(0, 1e3)), min_size=1, max_size=40)
+
+
+def _beats(a, b):
+    return a[0] >= b[0] and a[1] >= b[1] and (a[0] > b[0] or a[1] > b[1])
+
+
+@given(points)
+def test_the_front_holds_exactly_the_undominated_points(pts):
+    front = set(series.pareto_front(pts))
+
+    assert front
+    for i, p in enumerate(pts):
+        dominated = any(_beats(q, p) for q in pts)
+        assert (i in front) == (not dominated)
+
+
+@given(points)
+def test_every_pick_is_on_the_front_and_the_ends_are_the_extremes(pts):
+    front = series.pareto_front(pts)
+    picks = series.picks(pts)
+
+    assert set(picks.values()) <= set(front)
+    assert pts[picks["fastest"]][0] == max(p[0] for p in pts)
+    assert pts[picks["most_efficient"]][1] == max(p[1] for p in pts)

@@ -558,3 +558,29 @@ def test_a_sweep_where_nothing_finishes_fails(qapp, tmp_path, telemetry_sample):
                                          {"batch_size": [8]}, oom_batch=8)
 
     assert codes == [1]
+
+
+def test_sweep_table_marks_the_front_and_names_the_picks():
+    from gpu_bench.batch import Sweep
+
+    def entry(batch, speed, efficiency):
+        metric = lambda v: {"mean": v, "stdev": 0.0, "cv": 0.0, "min": v, "max": v, "n": 1}  # noqa: E731
+        return {"workload": {"batch_size": batch}, "status": "ok", "files": [],
+                "record": {"metrics": {"tokens_per_sec": metric(speed),
+                                       "tokens_per_joule": metric(efficiency),
+                                       "max_temp_c": metric(70.0)}}}
+
+    out = io.StringIO()
+    sweep = Sweep([{"batch_size": b} for b in (1, 2, 4, 8)], ["batch_size"],
+                  lambda w, d: None, out=out)
+    sweep.results = [entry(1, 1000, 40), entry(2, 1300, 39), entry(4, 1400, 30),
+                     {"workload": {"batch_size": 8}, "status": "out of memory",
+                      "record": None, "files": []}]
+    sweep._conclude()
+    text = out.getvalue()
+
+    assert "front · most efficient" in text
+    assert "front · fastest" in text
+    assert "front · balanced" in text
+    assert sweep.front == [0, 1, 2]
+    assert "Balanced:        batch 2 — 1,300 tokens/s at 39.0 tokens/J" in text

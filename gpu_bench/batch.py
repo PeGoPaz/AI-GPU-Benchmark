@@ -256,6 +256,15 @@ def failure_reason(error: str | None) -> str:
     return "failed"
 
 
+_PICK_LABELS = {"fastest": "fastest", "most_efficient": "most efficient",
+                "balanced": "balanced"}
+
+
+def _mean(entry: dict[str, Any], key: str) -> float | None:
+    metric = ((entry.get("record") or {}).get("metrics") or {}).get(key)
+    return float(metric["mean"]) if metric else None
+
+
 def _cell(metrics: dict[str, Any], key: str, fmt: str, spread: bool = True) -> str:
     """A metric's mean, with its spread if asked, for a table cell."""
     if not metrics.get(key):
@@ -295,6 +304,10 @@ class Sweep(QObject):
                                        f"sweep_{unique_stamp(output_dir, 'sweep_{}')}")
         # One entry per configuration: its workload, how it ended, its series.
         self.results: list[dict[str, Any]] = []
+        # Indices into results: the Pareto front of tokens/s against
+        # tokens/J, and the configurations it recommends.
+        self.front: list[int] = []
+        self.picks: dict[str, int] = {}
         self._current: Series | None = None
         self._interrupted = False
 
@@ -355,8 +368,20 @@ class Sweep(QObject):
         else:
             self._conclude()
 
+    def _rank(self) -> None:
+        """Finds the front and the picks among the configurations that finished."""
+        ranked = [i for i, r in enumerate(self.results)
+                  if r["status"] == "ok" and _mean(r, "tokens_per_sec") is not None
+                  and _mean(r, "tokens_per_joule") is not None]
+        points = [(_mean(self.results[i], "tokens_per_sec") or 0.0,
+                   _mean(self.results[i], "tokens_per_joule") or 0.0) for i in ranked]
+        self.front = [ranked[i] for i in series.pareto_front(points)]
+        self.picks = {name: ranked[i] for name, i in series.picks(points).items()}
+
     def _conclude(self) -> None:
+        self._rank()
         self._print_table()
+        self._print_picks()
         if self._interrupted:
             code = EXIT_INTERRUPTED
         else:
@@ -366,18 +391,39 @@ class Sweep(QObject):
     def _print_table(self) -> None:
         self._print(f"\n=== Sweep: {len(self.results)} of {len(self.configs)} "
                     "configurations run ===")
-        rows = [("Configuration", "Tokens/sec", "Tokens/J", "Max °C")]
-        for entry in self.results:
+        rows = [("Configuration", "Tokens/sec", "Tokens/J", "Max °C", "Pareto")]
+        for i, entry in enumerate(self.results):
             label = describe(entry["workload"], self.keys)
             metrics = (entry["record"] or {}).get("metrics") or {}
             if entry["status"] != "ok" or not metrics:
-                rows.append((label, entry["status"], "", ""))
+                rows.append((label, entry["status"], "", "", ""))
                 continue
             rows.append((label, _cell(metrics, "tokens_per_sec", "{:,.0f}"),
                          _cell(metrics, "tokens_per_joule", "{:.1f}"),
-                         _cell(metrics, "max_temp_c", "{:.0f}", spread=False)))
-        widths = [max(len(row[i]) for row in rows) for i in range(4)]
+                         _cell(metrics, "max_temp_c", "{:.0f}", spread=False),
+                         self._marker(i)))
+        widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
         for row in rows:
             self._print("  ".join(cell.ljust(width) if i == 0 else cell.rjust(width)
                                   for i, (cell, width) in enumerate(zip(row, widths,
                                                                         strict=True))).rstrip())
+
+    def _marker(self, index: int) -> str:
+        """'front' for a configuration on the Pareto front, with any pick it is."""
+        if index not in self.front:
+            return ""
+        named = [_PICK_LABELS[name] for name, i in self.picks.items() if i == index]
+        return " · ".join(["front", *named])
+
+    def _print_picks(self) -> None:
+        if not self.picks:
+            return
+        self._print("")
+        width = max(len(label) for label in _PICK_LABELS.values()) + 1
+        for name, index in self.picks.items():
+            entry = self.results[index]
+            speed = _mean(entry, "tokens_per_sec") or 0.0
+            efficiency = _mean(entry, "tokens_per_joule") or 0.0
+            self._print(f"{_PICK_LABELS[name].capitalize() + ':':<{width}}  "
+                        f"{describe(entry['workload'], self.keys)} — "
+                        f"{speed:,.0f} tokens/s at {efficiency:.1f} tokens/J")

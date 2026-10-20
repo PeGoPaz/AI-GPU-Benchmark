@@ -72,3 +72,29 @@ def test_format_shows_the_spread_and_range():
 
     assert series.format_aggregate(agg, "{:,.0f}") == "12,345 ± 1.2 %  (12,100 – 12,500)"
     assert series.format_aggregate({**agg, "n": 1}, "{:,.0f}") == "12,345"
+
+
+# (tokens/s, tokens/J)
+POINTS = [(1000, 40), (1400, 30), (1200, 38), (900, 35), (1400, 25), (1300, 39)]
+
+
+def test_the_front_is_what_nothing_beats_on_both_axes():
+    # (900, 35) loses to (1000, 40); (1400, 25) to (1400, 30); (1200, 38) to (1300, 39)
+    assert series.pareto_front(POINTS) == [0, 1, 5]
+
+
+def test_identical_points_are_all_on_the_front():
+    assert series.pareto_front([(1, 1), (1, 1)]) == [0, 1]
+
+
+def test_picks_name_the_ends_of_the_front_and_its_knee():
+    picks = series.picks(POINTS)
+
+    assert picks["fastest"] == 1
+    assert picks["most_efficient"] == 0
+    assert picks["balanced"] == 5          # 1300 tokens/s at 39 tokens/J
+
+
+def test_no_points_no_picks():
+    assert series.picks([]) == {}
+    assert series.pareto_front([]) == []
