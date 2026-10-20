@@ -61,6 +61,10 @@ jobs:
         os: [ubuntu-latest]
         python-version: ["3.10", "3.13"]
         include:
+          # Coverage is measured once, here; the floor is in pyproject.toml.
+          - os: ubuntu-latest
+            python-version: "3.13"
+            coverage: true
           # The whole suite on Windows too: paths, encodings, file locking
           # and Qt's platform plugin all differ there.
           - os: windows-latest
@@ -98,7 +102,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           MPLBACKEND: Agg
           HYPOTHESIS_PROFILE: ci
-        run: pytest -v
+        run: pytest -v ${{ matrix.coverage && '--cov --cov-report=term' || '' }}
+
+      - name: Coverage summary
+        if: matrix.coverage
+        run: python -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
       # The installed package, not the checkout: catches a module or the
       # icon missing from the wheel, which the tests above cannot see.
