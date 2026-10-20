@@ -56,7 +56,12 @@ def test_drain_returns_numpy_seconds_and_watts():
     assert seconds.dtype == np.float64 and watts.dtype == np.float32
     assert len(seconds) == len(watts) > 10
     assert set(watts.tolist()) == {150.0, 250.0}
-    assert before <= seconds[0] <= seconds[-1] <= after
+    # The stamps come from C++'s system_clock, which is precise; time.time()
+    # on Windows before Python 3.13 ticks in steps of up to 15.6 ms, and can
+    # read earlier than a sample taken before it. Its own resolution is the
+    # tolerance.
+    slack = time.get_clock_info("time").resolution
+    assert before - slack <= seconds[0] <= seconds[-1] <= after + slack
 
 
 def test_drain_hands_each_sample_over_once():
