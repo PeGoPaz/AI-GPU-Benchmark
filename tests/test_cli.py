@@ -619,3 +619,52 @@ def test_sweep_record_names_models_and_precisions_by_label(tmp_path):
     assert record["skipped"] == [{"label": "INT4 (NF4)", "settings": {"precision": "INT4 (NF4)"},
                                   "reason": "too big"}]
     json.dumps(record)                                  # plain JSON throughout
+
+
+# --- history ---------------------------------------------------------------------
+
+def test_a_finished_run_is_added_to_the_history(tmp_path, telemetry_sample):
+    from gpu_bench.utils.history import History
+
+    run, codes, _ = _run(tmp_path, telemetry_sample)
+
+    with History() as history:
+        (row,) = history.runs()
+    assert row.report_path == run.paths.report
+    assert row.gpu == "NVIDIA GeForce RTX 4060"
+
+
+def test_history_flag_lists_recent_runs(tmp_path, telemetry_sample, capsys):
+    _run(tmp_path, telemetry_sample)
+
+    cli.print_history(20)
+
+    out = capsys.readouterr().out
+    assert "NVIDIA GeForce RTX 4060" in out and "Qwen2.5 1.5B" in out
+
+
+def test_empty_history_says_how_to_fill_it(capsys):
+    cli.print_history(20)
+
+    assert "--history-import" in capsys.readouterr().out
+
+
+def test_history_import_reads_a_directory(tmp_path, telemetry_sample, capsys):
+    from gpu_bench.utils.history import History
+
+    _run(tmp_path, telemetry_sample)
+    with History() as history:
+        history.remove(history.runs()[0].report_path)
+
+    assert cli.import_history(str(tmp_path)) == 0
+    assert "Added 1 run" in capsys.readouterr().out
+    assert cli.import_history(str(tmp_path / "nope")) == 1
+
+
+def test_history_runs_without_headless(monkeypatch, capsys):
+    import main
+
+    monkeypatch.setattr("sys.argv", ["main.py", "--history"])
+
+    assert main.main() == 0
+    assert "History:" in capsys.readouterr().out

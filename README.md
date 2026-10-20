@@ -92,6 +92,17 @@ The GUI window opens with:
 - A resizable layout: telemetry and workload on the left (scrolling when the window is short), charts, summary and execution log on the right, split by draggable dividers. The log can be dragged shut or hidden from **View → Execution log**, and window size, panel splits and the log's visibility are restored on the next launch
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
+### Run history
+
+Every exported run — from the window, a headless run, a series or a sweep — is also added to a run history: one SQLite database in the user's data directory (`~/.local/share/ai-gpu-benchmark` on Linux, `%LOCALAPPDATA%\AI-GPU-Benchmark` on Windows, `~/Library/Application Support/AI-GPU-Benchmark` on macOS, or wherever `GPU_BENCH_HOME` points). It keeps the figures runs are compared by, plus each whole report as JSON, and points at the files rather than replacing them — they stay the record, and the history can be rebuilt from them at any time:
+
+```bash
+gpu-bench --history                  # the 20 most recent runs; --history 50 for more
+gpu-bench --history-import logs/     # add older reports, sweep directories included
+```
+
+The schema is versioned with SQLite's `user_version` pragma: each migration moves the database up one version inside a transaction, so a history written by an older version of the app is brought up to date the first time a newer one opens it, and a migration that fails leaves it exactly as it was. A history the app cannot write — a locked file, a read-only home — costs a note in the log, never an export.
+
 ### Headless (SSH, cloud GPUs)
 
 The same benchmark runs without a window — for a rented cloud GPU reached over SSH, or for scripting runs across cards:
@@ -233,6 +244,7 @@ gpu_bench/
     report.py                  — the versioned JSON run report written on export
     html_report.py             — the same run as one self-contained HTML page
     sweep_report.py            — a sweep as one page: the speed/efficiency chart with its Pareto front, and the table
+    history.py                 — the run history: every exported report indexed in SQLite, schema migrated by user_version
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU

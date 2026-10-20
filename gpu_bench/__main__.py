@@ -8,7 +8,7 @@ def main() -> int:
     # parse_known_args: anything argparse does not recognise is left for Qt,
     # which has flags of its own (-platform, -style, ...).
     args, qt_args = build_parser().parse_known_args()
-    if args.headless or args.list:
+    if args.headless or args.list or args.history or args.history_import:
         return run_headless(args)
 
     misuse = gui_only_misuse(args)

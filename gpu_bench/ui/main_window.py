@@ -74,6 +74,7 @@ from gpu_bench.ui.widgets.phase_progress import PhaseProgressBar
 from gpu_bench.ui.widgets.result_card import ResultCard
 from gpu_bench.ui.widgets.tile import MetricTile
 from gpu_bench.utils.display import RateTracker, format_progress, headline_cards, summary_rows
+from gpu_bench.utils.history import record_run
 from gpu_bench.utils.logger import BenchmarkLogger, PowerChunk
 from gpu_bench.utils.report import build_report
 
@@ -997,6 +998,10 @@ class MainWindow(QMainWindow):
         for path in paths:
             if path:
                 self.log_to_console(f"Exported: {path}")
+        if paths.report and report is not None:
+            problem = record_run(paths.report, report)
+            if problem:
+                self.log_to_console(f"Note: {problem}")
         if paths.html:
             self._last_html = paths.html
             self.act_open_report.setEnabled(True)

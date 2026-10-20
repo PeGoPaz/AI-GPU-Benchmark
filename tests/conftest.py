@@ -30,6 +30,15 @@ for _name in ("torch", "transformers", "peft", "datasets"):
 sys.modules["transformers"].TrainerCallback = object
 
 
+@pytest.fixture(autouse=True)
+def _isolated_history(tmp_path_factory, monkeypatch):
+    """Every test gets an empty run history of its own, never the user's.
+
+    Outside tmp_path, which tests inspect for exactly the files a run wrote.
+    """
+    monkeypatch.setenv("GPU_BENCH_HOME", str(tmp_path_factory.mktemp("gpu-bench-home")))
+
+
 @pytest.fixture
 def telemetry_sample():
     """Factory for a single NVML telemetry snapshot."""

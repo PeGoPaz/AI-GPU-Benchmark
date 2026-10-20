@@ -7,6 +7,7 @@ event loop, prints progress and the summary table to the terminal, and always
 exports CSV, PNG and the JSON report — a headless run exists to produce them.
 """
 import argparse
+import os
 import re
 import signal
 import sys
@@ -32,6 +33,7 @@ from gpu_bench.core.trainer import (
     fits_in_vram,
 )
 from gpu_bench.utils.display import RateTracker, format_progress, summary_rows
+from gpu_bench.utils.history import History, record_run
 from gpu_bench.utils.logger import BenchmarkLogger, ExportPaths
 from gpu_bench.utils.report import build_report
 
@@ -91,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="run without a window, print the results and exit")
     parser.add_argument("--list", action="store_true",
                         help="list presets, models and precisions, then exit")
+    parser.add_argument("--history", nargs="?", const=20, type=_at_least(1), metavar="N",
+                        help="list the N most recent runs in the history (default 20), "
+                             "then exit")
+    parser.add_argument("--history-import", metavar="DIR",
+                        help="add every run report under DIR to the history, then exit")
 
     workload = parser.add_argument_group(
         "workload (headless only; each flag overrides the preset)")
@@ -384,6 +391,10 @@ class HeadlessRun(QObject):
         for path in paths:
             if path:
                 self._print(f"Exported: {path}")
+        if paths.report:
+            problem = record_run(paths.report, report)
+            if problem:
+                self._print(f"Note: {problem}")
         self._finish(EXIT_INTERRUPTED if self._interrupted else 0)
 
     @pyqtSlot(str)
@@ -429,9 +440,49 @@ def split_by_fit(configs: list[dict[str, Any]], vram_total_mib: float | None
     return runnable, skipped
 
 
+def print_history(limit: int, out: TextIO | None = None) -> None:
+    out = out or sys.stdout
+    with History() as history:
+        rows = history.runs(limit)
+        print(f"History: {history.path}", file=out)
+    if not rows:
+        print("No runs yet. Every exported run is added; --history-import DIR adds "
+              "older ones.", file=out)
+        return
+    table = [("When", "GPU", "Model", "Precision", "Batch", "Seq", "Tokens/s", "Tokens/J")]
+    for r in rows:
+        table.append((r.created_at[:16].replace("T", " "), r.gpu or "?", r.model or "?",
+                      r.precision or "?", str(r.batch_size or "?"), str(r.seq_len or "?"),
+                      f"{r.tokens_per_sec:,.0f}" if r.tokens_per_sec else "—",
+                      f"{r.tokens_per_joule:.1f}" if r.tokens_per_joule else "—"))
+    widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
+    for row in table:
+        print("  ".join(cell.ljust(w) if i < 4 else cell.rjust(w)
+                        for i, (cell, w) in enumerate(zip(row, widths, strict=True))),
+              file=out)
+
+
+def import_history(directory: str, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    if not os.path.isdir(directory):
+        print(f"{directory} is not a directory.", file=out)
+        return 1
+    with History() as history:
+        added, unreadable = history.import_dir(directory)
+        print(f"Added {added} run{'' if added == 1 else 's'} to {history.path}.", file=out)
+    for problem in unreadable:
+        print(f"Skipped {problem}", file=out)
+    return 0
+
+
 def run_headless(args: argparse.Namespace) -> int:
     if args.list:
         print_registry()
+        return 0
+    if args.history_import:
+        return import_history(args.history_import)
+    if args.history:
+        print_history(args.history)
         return 0
 
     app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
