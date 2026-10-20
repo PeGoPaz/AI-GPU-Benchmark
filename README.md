@@ -93,37 +93,6 @@ The GUI window opens with:
 - A resizable layout: telemetry and workload on the left (scrolling when the window is short), charts, summary and execution log on the right, split by draggable dividers. The log can be dragged shut or hidden from **View → Execution log**, and window size, panel splits and the log's visibility are restored on the next launch
 - Theme and workload settings remembered between launches through `QSettings`; a value that no longer exists (a removed model, a hand-edited file) falls back to the default instead of stopping the app from starting
 
-### Live metrics for Prometheus
-
-A long sweep on a rented GPU is watched from somewhere else. `--metrics-port` serves the live telemetry and training progress in Prometheus' text format while the runs last:
-
-```bash
-gpu-bench --headless --preset stress --metrics-port 9400
-curl -s localhost:9400/metrics | grep gpu_bench_power
-```
-
-Every reading the dashboard shows is there in base units — `gpu_bench_temperature_celsius{sensor="gpu"|"memory"}`, `gpu_bench_power_watts` and the native sampler's `gpu_bench_power_peak_watts`, `gpu_bench_energy_joules_total` (a counter, so `rate()` of it is power), `gpu_bench_utilization_ratio`, `gpu_bench_memory_used_bytes`, `gpu_bench_sm_clock_hertz`, `gpu_bench_throttled{reason="power"|"thermal"}` — plus `gpu_bench_training_step`, `gpu_bench_training_tokens_per_second`, `gpu_bench_training_loss`, and a `gpu_bench_run_info` carrying the card, model and precision as labels. A reading the card does not report is left out rather than exported as zero. The server binds to 127.0.0.1 unless told otherwise (`--metrics-host 0.0.0.0`, inside a container), and the format is written by hand — a dozen lines with HELP and TYPE per family and label values escaped as the spec requires — rather than pulling in a dependency for one endpoint.
-
-`deploy/` has the rest of the picture ready to run: a Docker Compose stack with Prometheus scraping the benchmark every 5 seconds and Grafana with a provisioned *AI GPU Benchmark* dashboard — throughput and progress, temperature, polled power against the instant peak, the enforced limit and the energy counter's rate, SM clock, utilisation, throttling by reason, VRAM, tokens/s and loss.
-
-```bash
-gpu-bench --headless --preset stress --metrics-port 9400 --metrics-host 0.0.0.0
-docker compose -f deploy/docker-compose.yml up -d     # then http://localhost:3000
-```
-
-Both ports are bound to localhost only, and Grafana opens read-only to anonymous viewers. A test checks every query in the dashboard against the metrics the exporter actually defines, so renaming one cannot leave a panel silently empty.
-
-### Run history
-
-Every exported run — from the window, a headless run, a series or a sweep — is also added to a run history: one SQLite database in the user's data directory (`~/.local/share/ai-gpu-benchmark` on Linux, `%LOCALAPPDATA%\AI-GPU-Benchmark` on Windows, `~/Library/Application Support/AI-GPU-Benchmark` on macOS, or wherever `GPU_BENCH_HOME` points). It keeps the figures runs are compared by, plus each whole report as JSON, and points at the files rather than replacing them — they stay the record, and the history can be rebuilt from them at any time:
-
-```bash
-gpu-bench --history                  # the 20 most recent runs; --history 50 for more
-gpu-bench --history-import logs/     # add older reports, sweep directories included
-```
-
-The schema is versioned with SQLite's `user_version` pragma: each migration moves the database up one version inside a transaction, so a history written by an older version of the app is brought up to date the first time a newer one opens it, and a migration that fails leaves it exactly as it was. A history the app cannot write — a locked file, a read-only home — costs a note in the log, never an export.
-
 ### Headless (SSH, cloud GPUs)
 
 The same benchmark runs without a window — for a rented cloud GPU reached over SSH, or for scripting runs across cards:
@@ -156,6 +125,51 @@ Before anything runs, combinations whose weights alone would not fit the card's 
 Speed and efficiency pull against each other — the fastest setting is rarely the one that does the most work per joule — so there is usually no single winner, only a set of fair trades. The table marks that set: the **Pareto front**, the combinations nothing else beats on both tokens/sec and tokens/J at once; everything off it is a worse deal than something on it. Three of them are named underneath: the *fastest*, the *most efficient*, and the *balanced* one — the front point nearest the ideal that would be both, with each axis scaled to the range the sweep covered so that neither unit dominates.
 
 The sweep directory ends up holding every run's files, a `series_*.json` per combination when `--repeat` is above one, and the sweep itself as `sweep_<timestamp>.json` — the axes, each combination's aggregates and status, what was skipped and why, the front and the picks — plus `sweep_<timestamp>.html`: the trade-off as a chart of tokens/sec against tokens/J with the front drawn through it and the picks labelled, and the full table under it. Like the per-run page it is one self-contained file with the same stylesheet, built from the JSON alone.
+
+### Docker
+
+The headless benchmark also ships as a container image, for a GPU server or a cloud instance where installing a Python environment is the slow part. It needs the NVIDIA driver and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) on the host:
+
+```bash
+docker build -t gpu-bench .
+docker run --rm --gpus all -v "$PWD/logs:/home/bench/logs" -v hf-cache:/home/bench/.cache/huggingface \
+    gpu-bench --preset standard --repeat 3 --cooldown 120
+```
+
+Everything after the image name is passed to `gpu-bench --headless`, and results land in the mounted `logs/`. The image is built on PyTorch's CUDA runtime image, so torch is the CUDA build matching it rather than whatever pip resolves; the native power sampler is compiled in a first build stage and only its wheel is carried over, so the final image has no compiler. It runs as an unprivileged user, asks the driver for its `utility` capability as well as `compute` (NVML needs it), and keeps the Hugging Face cache on a volume so models download once. With the compose stack, `--profile bench` runs it alongside Prometheus and Grafana, already scraped.
+
+### Live metrics for Prometheus
+
+A long sweep on a rented GPU is watched from somewhere else. `--metrics-port` serves the live telemetry and training progress in Prometheus' text format while the runs last:
+
+```bash
+gpu-bench --headless --preset stress --metrics-port 9400
+curl -s localhost:9400/metrics | grep gpu_bench_power
+```
+
+Every reading the dashboard shows is there in base units — `gpu_bench_temperature_celsius{sensor="gpu"|"memory"}`, `gpu_bench_power_watts` and the native sampler's `gpu_bench_power_peak_watts`, `gpu_bench_energy_joules_total` (a counter, so `rate()` of it is power), `gpu_bench_utilization_ratio`, `gpu_bench_memory_used_bytes`, `gpu_bench_sm_clock_hertz`, `gpu_bench_throttled{reason="power"|"thermal"}` — plus `gpu_bench_training_step`, `gpu_bench_training_tokens_per_second`, `gpu_bench_training_loss`, and a `gpu_bench_run_info` carrying the card, model and precision as labels. A reading the card does not report is left out rather than exported as zero. The server binds to 127.0.0.1 unless told otherwise (`--metrics-host 0.0.0.0`, inside a container), and the format is written by hand — a dozen lines with HELP and TYPE per family and label values escaped as the spec requires — rather than pulling in a dependency for one endpoint.
+
+`deploy/` has the rest of the picture ready to run: a Docker Compose stack with Prometheus scraping the benchmark every 5 seconds and Grafana with a provisioned *AI GPU Benchmark* dashboard — throughput and progress, temperature, polled power against the instant peak, the enforced limit and the energy counter's rate, SM clock, utilisation, throttling by reason, VRAM, tokens/s and loss.
+
+```bash
+gpu-bench --headless --preset stress --metrics-port 9400 --metrics-host 0.0.0.0
+docker compose -f deploy/docker-compose.yml up -d     # then http://localhost:3000
+```
+
+Or the whole thing in containers: `docker compose -f deploy/docker-compose.yml --profile bench up --build`.
+
+Both ports are bound to localhost only, and Grafana opens read-only to anonymous viewers. A test checks every query in the dashboard against the metrics the exporter actually defines, so renaming one cannot leave a panel silently empty.
+
+### Run history
+
+Every exported run — from the window, a headless run, a series or a sweep — is also added to a run history: one SQLite database in the user's data directory (`~/.local/share/ai-gpu-benchmark` on Linux, `%LOCALAPPDATA%\AI-GPU-Benchmark` on Windows, `~/Library/Application Support/AI-GPU-Benchmark` on macOS, or wherever `GPU_BENCH_HOME` points). It keeps the figures runs are compared by, plus each whole report as JSON, and points at the files rather than replacing them — they stay the record, and the history can be rebuilt from them at any time:
+
+```bash
+gpu-bench --history                  # the 20 most recent runs; --history 50 for more
+gpu-bench --history-import logs/     # add older reports, sweep directories included
+```
+
+The schema is versioned with SQLite's `user_version` pragma: each migration moves the database up one version inside a transaction, so a history written by an older version of the app is brought up to date the first time a newer one opens it, and a migration that fails leaves it exactly as it was. A history the app cannot write — a locked file, a read-only home — costs a note in the log, never an export.
 
 ---
 
@@ -270,7 +284,8 @@ gpu_bench/
     prometheus.py              — live telemetry in Prometheus' text format, served on a daemon thread with --metrics-port
     display.py                 — summary rows and the progress line, shared by window and CLI
 native/                        — optional C++ extension (CMake + pybind11): the high-rate power sampler
-deploy/                        — Docker Compose stack: Prometheus scraping --metrics-port, Grafana with a provisioned dashboard
+deploy/                        — Docker Compose stack: Prometheus scraping --metrics-port, Grafana with a provisioned dashboard, the benchmark itself
+Dockerfile                     — the headless benchmark as a CUDA image: native wheel built in a first stage, run unprivileged
 tests/                         — pytest suite; the ML stack and NVML are stubbed, so it runs without a GPU
 .github/workflows/ci.yml       — CI: ruff, mypy, tests on Linux (3.10, 3.13) and Windows; native build on three OSes, sanitizers, clang-format
 pytest.ini                     — pytest configuration

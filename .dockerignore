@@ -1,0 +1,17 @@
+# Only what the Dockerfile copies matters; this keeps the build context small.
+.git
+venv
+.venv
+logs
+results
+build
+dist
+native/build
+**/__pycache__
+**/*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.hypothesis
+*.so
+*.dylib

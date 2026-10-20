@@ -6,6 +6,10 @@
 # then open http://localhost:3000 (the dashboard is provisioned; anonymous
 # viewing is on, and admin/admin signs in to edit). Both ports are bound to
 # localhost only: nothing here is meant to be reachable from the network.
+#
+# Or run the benchmark in a container as well, built from the Dockerfile:
+#
+#   docker compose -f deploy/docker-compose.yml --profile bench up --build
 name: gpu-bench
 
 services:
@@ -34,3 +38,25 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     restart: unless-stopped
+
+  bench:
+    profiles: [bench]
+    build:
+      context: ..
+    image: gpu-bench
+    command: ["--preset", "standard", "--metrics-port", "9400", "--metrics-host", "0.0.0.0"]
+    volumes:
+      # The container runs as uid 1000; on a host where that is not you,
+      # create logs/ writable for it first.
+      - ../logs:/home/bench/logs
+      - hf-cache:/home/bench/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:

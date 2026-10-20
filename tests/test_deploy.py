@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from gpu_bench.utils.prometheus import NAMES
 
 DEPLOY = Path(__file__).resolve().parent.parent / "deploy"
@@ -62,3 +64,44 @@ def test_prometheus_scrapes_the_default_metrics_port():
     config = (DEPLOY / "prometheus" / "prometheus.yml").read_text(encoding="utf-8")
 
     assert "host.docker.internal:9400" in config
+
+
+# --- the container image ------------------------------------------------------
+
+DOCKERFILE = (DEPLOY.parent / "Dockerfile").read_text(encoding="utf-8")
+
+
+def _instructions(keyword):
+    return [line.split(None, 1)[1] for line in DOCKERFILE.splitlines()
+            if line.split(None, 1)[:1] == [keyword]]
+
+
+def test_the_base_image_is_pinned_to_an_exact_tag():
+    (base,) = [line for line in DOCKERFILE.splitlines() if line.startswith("ARG PYTORCH_IMAGE=")]
+    tag = base.split(":", 1)[1]
+
+    assert tag != "latest" and any(ch.isdigit() for ch in tag)
+
+
+def test_the_image_runs_the_installed_command_as_a_non_root_user():
+    tomllib = pytest.importorskip("tomllib")
+    scripts = tomllib.loads((DEPLOY.parent / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"]["scripts"]
+
+    (entrypoint,) = _instructions("ENTRYPOINT")
+    assert json.loads(entrypoint)[:2] == ["gpu-bench", "--headless"]
+    assert "gpu-bench" in scripts
+    assert _instructions("USER") == ["bench"]
+
+
+def test_the_image_exposes_the_port_prometheus_scrapes():
+    config = (DEPLOY / "prometheus" / "prometheus.yml").read_text(encoding="utf-8")
+
+    assert _instructions("EXPOSE") == ["9400"]
+    assert "bench:9400" in config
+
+
+def test_the_final_stage_carries_no_compiler():
+    final_stage = DOCKERFILE.rsplit("\nFROM ", 1)[1]
+
+    assert "g++" not in final_stage and "build-essential" not in final_stage
