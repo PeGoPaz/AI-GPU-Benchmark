@@ -56,6 +56,7 @@ from gpu_bench.core.trainer import (
 from gpu_bench.ui import icons, readings
 from gpu_bench.ui.about import AboutDialog, about_rows, app_icon
 from gpu_bench.ui.compare_window import CompareWindow, load_runs
+from gpu_bench.ui.history_window import HistoryWindow
 from gpu_bench.ui.live_charts import LiveCharts
 from gpu_bench.ui.style import (
     LIGHT,
@@ -444,6 +445,13 @@ class MainWindow(QMainWindow):
         self.act_log.setShortcut(QKeySequence("Ctrl+L"))
         self.act_log.toggled.connect(self.log_panel.setVisible)
         view_menu.addAction(self.act_log)
+        self.act_history = QAction("Run &history…", self)
+        self.act_history.setShortcut(QKeySequence("Ctrl+H"))
+        self.act_history.setToolTip("Every exported run, sortable, filterable and comparable")
+        self.act_history.triggered.connect(self.show_history)
+        view_menu.addSeparator()
+        view_menu.addAction(self.act_history)
+        self._history_window: HistoryWindow | None = None
 
         help_menu = menu_bar.addMenu("&Help")
         assert help_menu is not None
@@ -1002,6 +1010,8 @@ class MainWindow(QMainWindow):
             problem = record_run(paths.report, report)
             if problem:
                 self.log_to_console(f"Note: {problem}")
+            elif self._history_window is not None:
+                self._history_window.refresh()
         if paths.html:
             self._last_html = paths.html
             self.act_open_report.setEnabled(True)
@@ -1022,6 +1032,17 @@ class MainWindow(QMainWindow):
         self._compare_windows.append(window)
         window.show()
         return window
+
+    def show_history(self) -> HistoryWindow:
+        """Opens the run history, or brings the open one to the front."""
+        if self._history_window is None:
+            self._history_window = HistoryWindow(compare=self.compare_runs)
+        else:
+            self._history_window.refresh()
+        self._history_window.show()
+        self._history_window.raise_()
+        self._history_window.activateWindow()
+        return self._history_window
 
     def open_report(self) -> None:
         if self._last_html:

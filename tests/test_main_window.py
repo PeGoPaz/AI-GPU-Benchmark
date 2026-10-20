@@ -1284,3 +1284,16 @@ def test_failed_run_says_so_where_results_would_be(started_run):
 
     assert started_run.summary_stack.currentWidget() is started_run.empty_summary
     assert started_run.empty_summary.title() == "The run failed"
+
+
+def test_history_opens_from_the_view_menu_and_compares_through_the_window(window, monkeypatch):
+    assert window.act_history.shortcut().toString() == "Ctrl+H"
+
+    history = window.show_history()
+    calls = []
+    monkeypatch.setattr(window, "compare_runs", lambda paths=None: calls.append(paths))
+    history.compare(["a.json", "b.json"])
+
+    assert history.isVisible()
+    assert window.show_history() is history          # one window, brought forward
+    history.close()
