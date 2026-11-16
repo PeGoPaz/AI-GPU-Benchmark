@@ -69,6 +69,10 @@ jobs:
           # and Qt's platform plugin all differ there.
           - os: windows-latest
             python-version: "3.13"
+          # macOS is where development happens, but pytest never ran there -
+          # only the native job's ctest and one sampler test did.
+          - os: macos-latest
+            python-version: "3.13"
 
     steps:
       - uses: actions/checkout@v7
