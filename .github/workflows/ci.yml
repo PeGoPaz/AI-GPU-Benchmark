@@ -59,7 +59,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.10", "3.13", "3.14"]
         include:
           # Coverage is measured once, here; the floor is in pyproject.toml.
           - os: ubuntu-latest
